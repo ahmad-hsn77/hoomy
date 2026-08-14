@@ -687,6 +687,23 @@ app.get('/health', (_req, res) => {
   });
 });
 
+app.get('/app/update', (req, res) => {
+  const latestVersion = process.env.APP_LATEST_VERSION?.trim() || '0.1.0';
+  const minimumSupportedVersion =
+    process.env.APP_MIN_SUPPORTED_VERSION?.trim() || '';
+  const updateUrl = process.env.APP_UPDATE_URL?.trim() || '';
+  const releaseNotes = process.env.APP_UPDATE_NOTES?.trim() || '';
+  const currentVersion = req.query.currentVersion?.toString() || '';
+
+  res.json({
+    latestVersion,
+    minimumSupportedVersion,
+    updateUrl,
+    releaseNotes,
+    currentVersion,
+  });
+});
+
 app.get('/', (_req, res) => {
   res.json({
     ok: true,
