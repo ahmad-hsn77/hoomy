@@ -286,6 +286,7 @@ function requireHouseMember(req, res, next) {
 function houseState(house, userId) {
   return {
     house,
+    houses: housesForUser(userId),
     members: house.members.map((member) => ({
       ...member,
       user: publicUser(db.users.find((user) => user.id === member.userId) || {}),
@@ -301,11 +302,16 @@ function firstHouseForUser(userId) {
   return db.houses.find((house) => house.members.some((member) => member.userId === userId));
 }
 
+function housesForUser(userId) {
+  return db.houses.filter((house) => house.members.some((member) => idOf(member.userId) === idOf(userId)));
+}
+
 function authState(user, extra = {}) {
   const house = firstHouseForUser(user.id);
   return {
     ...extra,
     user: publicUser(user),
+    houses: housesForUser(user.id),
     ...(house ? houseState(house, user.id) : {}),
   };
 }
