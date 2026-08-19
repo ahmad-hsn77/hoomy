@@ -808,6 +808,32 @@ app.get('/auth/me', requireAuth, (req, res) => {
 });
 
 app.put('/users/me/profile', requireAuth, (req, res) => {
+  if (Object.prototype.hasOwnProperty.call(req.body, 'name')) {
+    const name = req.body.name?.toString().trim();
+    if (!name) return res.status(400).json({ message: 'Name is required' });
+    if (req.user.childMode) {
+      const duplicate = db.users.find(
+        (user) => user.id !== req.user.id && user.childMode && normalize(user.name) === normalize(name)
+      );
+      if (duplicate) return res.status(409).json({ message: 'A child account with this name already exists' });
+    }
+    req.user.name = name;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(req.body, 'phone')) {
+    const phone = req.body.phone?.toString().trim() || null;
+    if (!req.user.childMode && !phone && !req.user.email) {
+      return res.status(400).json({ message: 'Phone or email is required' });
+    }
+    if (phone) {
+      const duplicate = db.users.find(
+        (user) => user.id !== req.user.id && normalize(user.phone) === normalize(phone)
+      );
+      if (duplicate) return res.status(409).json({ message: 'Account with this phone number already exists' });
+    }
+    req.user.phone = phone;
+  }
+
   if (Object.prototype.hasOwnProperty.call(req.body, 'birthDate')) {
     req.user.birthDate = req.body.birthDate ? req.body.birthDate.toString() : null;
   }
