@@ -17,7 +17,7 @@ const io = new Server(server, {
 });
 
 app.use(cors({ origin: process.env.CORS_ORIGIN || '*' }));
-app.use(express.json());
+app.use(express.json({ limit: '8mb' }));
 
 const jwtSecret = process.env.JWT_SECRET || 'dev-secret';
 let firebaseApp = null;
@@ -316,13 +316,38 @@ function authState(user, extra = {}) {
   };
 }
 
-function createHouseMessage({ houseId, senderId, text, system = false, notify = true }) {
+function createHouseMessage({
+  houseId,
+  senderId,
+  text,
+  system = false,
+  notify = true,
+  replyToMessageId = null,
+  audio = false,
+  audioBase64 = null,
+  audioMimeType = null,
+  audioDurationSeconds = null,
+}) {
+  const replyTo = replyToMessageId
+    ? db.messages.find((item) => item.houseId === houseId && item.id === replyToMessageId)
+    : null;
   const message = {
     id: uuid(),
     houseId,
     text,
     senderId,
     system,
+    receivedBy: [senderId],
+    seenBy: [],
+    replyToMessageId: replyTo?.id || null,
+    replyToSenderId: replyTo?.senderId || null,
+    replyToText: replyTo?.text || null,
+    edited: false,
+    editedAt: null,
+    audio: Boolean(audio),
+    audioBase64: audio ? audioBase64 : null,
+    audioMimeType: audio ? audioMimeType : null,
+    audioDurationSeconds: audio ? audioDurationSeconds : null,
     createdAt: new Date().toISOString(),
   };
   db.messages.push(message);
@@ -336,6 +361,21 @@ function createHouseMessage({ houseId, senderId, text, system = false, notify = 
     });
   }
   return message;
+}
+
+function markMessageReceived(message, userId) {
+  message.receivedBy = Array.isArray(message.receivedBy) ? message.receivedBy : [];
+  if (!message.receivedBy.some((id) => idOf(id) === idOf(userId))) {
+    message.receivedBy.push(userId);
+  }
+}
+
+function markMessageSeen(message, userId) {
+  markMessageReceived(message, userId);
+  message.seenBy = Array.isArray(message.seenBy) ? message.seenBy : [];
+  if (!message.seenBy.some((id) => idOf(id) === idOf(userId))) {
+    message.seenBy.push(userId);
+  }
 }
 
 function removeBadPushTokens(tokens, response) {
@@ -432,7 +472,7 @@ async function sendMessagePush({ house, message, sender }) {
 
   const senderName = sender?.name || 'Family';
   const title = message.system ? 'Family update' : `${senderName} in family chat`;
-  const body = message.text || 'New family message';
+  const body = message.audio ? 'Voice message' : message.text || 'New family message';
   try {
     const response = await firebaseMessaging.sendEachForMulticast({
       tokens,
@@ -1182,12 +1222,76 @@ app.delete('/houses/:houseId/reminders/:reminderId', requireAuth, requireHouseMe
 });
 
 app.post('/houses/:houseId/messages', requireAuth, requireHouseMember, (req, res) => {
+  const replyToMessageId = req.body.replyToMessageId ? req.body.replyToMessageId.toString() : null;
+  if (replyToMessageId) {
+    const replyTo = db.messages.find((item) => item.houseId === req.house.id && item.id === replyToMessageId);
+    if (!replyTo) return res.status(404).json({ message: 'Reply message not found' });
+  }
+  const audio = req.body.audio === true;
+  const text = (req.body.text || '').toString().trim();
+  const audioBase64 = req.body.audioBase64?.toString() || null;
+  const audioMimeType = req.body.audioMimeType?.toString() || 'audio/mp4';
+  const audioDurationSeconds = Number.isFinite(Number(req.body.audioDurationSeconds))
+    ? Math.max(0, Math.round(Number(req.body.audioDurationSeconds)))
+    : null;
+
+  if (audio && !audioBase64) return res.status(400).json({ message: 'Audio data is required' });
+  if (!audio && !text) return res.status(400).json({ message: 'Message text is required' });
+
   const message = createHouseMessage({
     houseId: req.house.id,
     senderId: req.user.id,
-    text: req.body.text,
+    text: audio ? text || 'Voice message' : text,
+    replyToMessageId,
+    audio,
+    audioBase64,
+    audioMimeType,
+    audioDurationSeconds,
   });
   res.status(201).json(message);
+});
+
+app.put('/houses/:houseId/messages/:messageId', requireAuth, requireHouseMember, (req, res) => {
+  const message = db.messages.find((item) => item.houseId === req.house.id && item.id === req.params.messageId);
+  if (!message) return res.status(404).json({ message: 'Message not found' });
+  if (message.system) return res.status(400).json({ message: 'System messages cannot be edited' });
+  if (message.audio) return res.status(400).json({ message: 'Voice messages cannot be edited' });
+  if (message.senderId !== req.user.id) return res.status(403).json({ message: 'You can edit only your own messages' });
+
+  const text = (req.body.text || '').toString().trim();
+  if (!text) return res.status(400).json({ message: 'Message text is required' });
+
+  message.text = text;
+  message.edited = true;
+  message.editedAt = new Date().toISOString();
+  persistDb();
+  io.to(req.house.id).emit('messageUpdated', message);
+  res.json(message);
+});
+
+app.post('/houses/:houseId/messages/:messageId/received', requireAuth, requireHouseMember, (req, res) => {
+  const message = db.messages.find((item) => item.houseId === req.house.id && item.id === req.params.messageId);
+  if (!message) return res.status(404).json({ message: 'Message not found' });
+  markMessageReceived(message, req.user.id);
+  persistDb();
+  io.to(req.house.id).emit('messageUpdated', message);
+  res.json(message);
+});
+
+app.post('/houses/:houseId/messages/seen', requireAuth, requireHouseMember, (req, res) => {
+  const updated = [];
+  for (const message of db.messages) {
+    if (message.houseId !== req.house.id || message.senderId === req.user.id) continue;
+    const before = JSON.stringify({ receivedBy: message.receivedBy, seenBy: message.seenBy });
+    markMessageSeen(message, req.user.id);
+    const after = JSON.stringify({ receivedBy: message.receivedBy, seenBy: message.seenBy });
+    if (before !== after) updated.push(message);
+  }
+  if (updated.length > 0) {
+    persistDb();
+    for (const message of updated) io.to(req.house.id).emit('messageUpdated', message);
+  }
+  res.json({ ok: true, messages: updated });
 });
 
 app.post('/houses/:houseId/shortcuts', requireAuth, requireHouseMember, (req, res) => {
