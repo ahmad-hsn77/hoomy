@@ -490,7 +490,6 @@ async function sendMessagePush({ house, message, sender }) {
   try {
     const response = await firebaseMessaging.sendEachForMulticast({
       tokens,
-      notification: { title, body },
       data: pushData({
         type: 'messageCreated',
         messageId: message.id,
@@ -502,23 +501,15 @@ async function sendMessagePush({ house, message, sender }) {
       }),
       android: {
         priority: 'high',
-        notification: {
-          channelId: notificationChannels.chatMessages,
-          icon: 'ic_notification_house',
-          sound: 'message_chime',
-          priority: 'high',
-          visibility: 'public',
-        },
       },
       apns: {
         headers: {
-          'apns-priority': '10',
-          'apns-push-type': 'alert',
+          'apns-priority': '5',
+          'apns-push-type': 'background',
         },
         payload: {
           aps: {
-            alert: { title, body },
-            sound: 'message_chime.wav',
+            contentAvailable: true,
           },
         },
       },
@@ -937,7 +928,9 @@ app.post('/devices/test-notification', requireAuth, async (req, res) => {
       android: {
         priority: 'high',
         notification: {
-          channelId: req.body.emergency === true ? 'hoomy_emergency_alerts_alarm_v2' : 'hoomy_need_alerts',
+          channelId: req.body.emergency === true
+            ? notificationChannels.emergencyAlerts
+            : notificationChannels.needAlerts,
           icon: 'ic_notification_house',
           sound: req.body.emergency === true ? 'emergency_ring' : 'default',
           priority: req.body.emergency === true ? 'max' : 'high',
@@ -1161,7 +1154,7 @@ app.post('/houses/:houseId/alerts/:alertId/bought', requireAuth, requireHouseMem
   createHouseMessage({
     houseId: req.house.id,
     senderId: req.user.id,
-    text: `${req.user.name} bought ${alert.title}${req.body.price ? ` for ${req.body.price}` : ''}.`,
+    text: `${alert.title} has been done by ${req.user.name}${req.body.price ? ` for ${req.body.price}` : ''}.`,
     system: true,
   });
   res.json(alert);
