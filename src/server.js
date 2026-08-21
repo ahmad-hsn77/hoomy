@@ -221,6 +221,7 @@ const notificationChannels = {
   chatMessages: 'hoomy_chat_messages_chime_v2',
   reminders: 'hoomy_reminders_alarm_v1',
 };
+const allowedMessageReactions = ['❤️', '😂', '👍', '🙏', '😮', '😢'];
 
 function normalize(value) {
   return value?.toString().trim().toLowerCase() || '';
@@ -339,6 +340,7 @@ function createHouseMessage({
     system,
     receivedBy: [senderId],
     seenBy: [],
+    reactions: [],
     replyToMessageId: replyTo?.id || null,
     replyToSenderId: replyTo?.senderId || null,
     replyToText: replyTo?.text || null,
@@ -375,6 +377,18 @@ function markMessageSeen(message, userId) {
   message.seenBy = Array.isArray(message.seenBy) ? message.seenBy : [];
   if (!message.seenBy.some((id) => idOf(id) === idOf(userId))) {
     message.seenBy.push(userId);
+  }
+}
+
+function setMessageReaction(message, userId, emoji) {
+  message.reactions = Array.isArray(message.reactions) ? message.reactions : [];
+  message.reactions = message.reactions.filter((reaction) => idOf(reaction.userId) !== idOf(userId));
+  if (emoji) {
+    message.reactions.push({
+      userId,
+      emoji,
+      reactedAt: new Date().toISOString(),
+    });
   }
 }
 
@@ -1273,6 +1287,21 @@ app.post('/houses/:houseId/messages/:messageId/received', requireAuth, requireHo
   const message = db.messages.find((item) => item.houseId === req.house.id && item.id === req.params.messageId);
   if (!message) return res.status(404).json({ message: 'Message not found' });
   markMessageReceived(message, req.user.id);
+  persistDb();
+  io.to(req.house.id).emit('messageUpdated', message);
+  res.json(message);
+});
+
+app.put('/houses/:houseId/messages/:messageId/reaction', requireAuth, requireHouseMember, (req, res) => {
+  const message = db.messages.find((item) => item.houseId === req.house.id && item.id === req.params.messageId);
+  if (!message) return res.status(404).json({ message: 'Message not found' });
+
+  const emoji = req.body.emoji ? req.body.emoji.toString() : null;
+  if (emoji && !allowedMessageReactions.includes(emoji)) {
+    return res.status(400).json({ message: 'Unsupported reaction' });
+  }
+
+  setMessageReaction(message, req.user.id, emoji);
   persistDb();
   io.to(req.house.id).emit('messageUpdated', message);
   res.json(message);
