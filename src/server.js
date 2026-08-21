@@ -328,6 +328,9 @@ function createHouseMessage({
   audioBase64 = null,
   audioMimeType = null,
   audioDurationSeconds = null,
+  image = false,
+  imageBase64 = null,
+  imageMimeType = null,
 }) {
   const replyTo = replyToMessageId
     ? db.messages.find((item) => item.houseId === houseId && item.id === replyToMessageId)
@@ -350,6 +353,9 @@ function createHouseMessage({
     audioBase64: audio ? audioBase64 : null,
     audioMimeType: audio ? audioMimeType : null,
     audioDurationSeconds: audio ? audioDurationSeconds : null,
+    image: Boolean(image),
+    imageBase64: image ? imageBase64 : null,
+    imageMimeType: image ? imageMimeType : null,
     createdAt: new Date().toISOString(),
   };
   db.messages.push(message);
@@ -486,7 +492,11 @@ async function sendMessagePush({ house, message, sender }) {
 
   const senderName = sender?.name || 'Family';
   const title = message.system ? 'Family update' : `${senderName} in family chat`;
-  const body = message.audio ? 'Voice message' : message.text || 'New family message';
+  const body = message.audio
+    ? 'Voice message'
+    : message.image
+      ? 'Photo'
+      : message.text || 'New family message';
   try {
     const response = await firebaseMessaging.sendEachForMulticast({
       tokens,
@@ -1235,25 +1245,32 @@ app.post('/houses/:houseId/messages', requireAuth, requireHouseMember, (req, res
     if (!replyTo) return res.status(404).json({ message: 'Reply message not found' });
   }
   const audio = req.body.audio === true;
+  const image = req.body.image === true;
   const text = (req.body.text || '').toString().trim();
   const audioBase64 = req.body.audioBase64?.toString() || null;
   const audioMimeType = req.body.audioMimeType?.toString() || 'audio/mp4';
   const audioDurationSeconds = Number.isFinite(Number(req.body.audioDurationSeconds))
     ? Math.max(0, Math.round(Number(req.body.audioDurationSeconds)))
     : null;
+  const imageBase64 = req.body.imageBase64?.toString() || null;
+  const imageMimeType = req.body.imageMimeType?.toString() || 'image/jpeg';
 
   if (audio && !audioBase64) return res.status(400).json({ message: 'Audio data is required' });
-  if (!audio && !text) return res.status(400).json({ message: 'Message text is required' });
+  if (image && !imageBase64) return res.status(400).json({ message: 'Image data is required' });
+  if (!audio && !image && !text) return res.status(400).json({ message: 'Message text is required' });
 
   const message = createHouseMessage({
     houseId: req.house.id,
     senderId: req.user.id,
-    text: audio ? text || 'Voice message' : text,
+    text: audio ? text || 'Voice message' : image ? text || 'Photo' : text,
     replyToMessageId,
     audio,
     audioBase64,
     audioMimeType,
     audioDurationSeconds,
+    image,
+    imageBase64,
+    imageMimeType,
   });
   res.status(201).json(message);
 });
@@ -1263,6 +1280,7 @@ app.put('/houses/:houseId/messages/:messageId', requireAuth, requireHouseMember,
   if (!message) return res.status(404).json({ message: 'Message not found' });
   if (message.system) return res.status(400).json({ message: 'System messages cannot be edited' });
   if (message.audio) return res.status(400).json({ message: 'Voice messages cannot be edited' });
+  if (message.image) return res.status(400).json({ message: 'Image messages cannot be edited' });
   if (message.senderId !== req.user.id) return res.status(403).json({ message: 'You can edit only your own messages' });
 
   const text = (req.body.text || '').toString().trim();
