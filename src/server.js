@@ -514,12 +514,14 @@ async function sendMessagePush({ house, message, sender }) {
       },
       apns: {
         headers: {
-          'apns-priority': '5',
-          'apns-push-type': 'background',
+          'apns-priority': '10',
+          'apns-push-type': 'alert',
         },
         payload: {
           aps: {
-            contentAvailable: true,
+            alert: { title, body },
+            sound: 'message_chime.wav',
+            threadId: 'com.idea.hoomy.hoomy.FAMILY_CHAT',
           },
         },
       },
