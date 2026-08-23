@@ -500,6 +500,7 @@ async function sendMessagePush({ house, message, sender }) {
   try {
     const response = await firebaseMessaging.sendEachForMulticast({
       tokens,
+      notification: { title, body },
       data: pushData({
         type: 'messageCreated',
         messageId: message.id,
@@ -511,6 +512,14 @@ async function sendMessagePush({ house, message, sender }) {
       }),
       android: {
         priority: 'high',
+        notification: {
+          channelId: notificationChannels.chatMessages,
+          icon: 'ic_notification_house',
+          sound: 'message_chime',
+          priority: 'high',
+          visibility: 'public',
+          tag: `chat-${house.id}`,
+        },
       },
       apns: {
         headers: {
@@ -521,7 +530,7 @@ async function sendMessagePush({ house, message, sender }) {
           aps: {
             alert: { title, body },
             sound: 'message_chime.wav',
-            threadId: 'com.idea.hoomy.hoomy.FAMILY_CHAT',
+            'thread-id': 'com.idea.hoomy.hoomy.FAMILY_CHAT',
           },
         },
       },
@@ -1184,6 +1193,12 @@ app.delete('/houses/:houseId/alerts/:alertId', requireAuth, requireHouseMember, 
   db.alerts.splice(index, 1);
   persistDb();
   io.to(req.house.id).emit('alertDeleted', { id: alert.id, houseId: req.house.id });
+  createHouseMessage({
+    houseId: req.house.id,
+    senderId: req.user.id,
+    text: `${req.user.name} canceled ${alert.title}.`,
+    system: true,
+  });
   res.json({ ok: true, id: alert.id });
 });
 
