@@ -1172,6 +1172,21 @@ app.post('/houses/:houseId/alerts/:alertId/bought', requireAuth, requireHouseMem
   res.json(alert);
 });
 
+app.delete('/houses/:houseId/alerts/:alertId', requireAuth, requireHouseMember, (req, res) => {
+  const index = db.alerts.findIndex((item) => item.id === req.params.alertId && item.houseId === req.house.id);
+  if (index === -1) return res.status(404).json({ message: 'Alert not found' });
+
+  const alert = db.alerts[index];
+  if (idOf(alert.createdBy) !== idOf(req.user.id)) {
+    return res.status(403).json({ message: 'Only the member who added this need can cancel it' });
+  }
+
+  db.alerts.splice(index, 1);
+  persistDb();
+  io.to(req.house.id).emit('alertDeleted', { id: alert.id, houseId: req.house.id });
+  res.json({ ok: true, id: alert.id });
+});
+
 app.post('/houses/:houseId/reminders', requireAuth, requireHouseMember, (req, res) => {
   const isBirthday = req.body.isBirthday === true;
   const birthdayMemberId = req.body.birthdayMemberId ? idOf(req.body.birthdayMemberId) : null;
