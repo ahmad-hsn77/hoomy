@@ -457,6 +457,25 @@ function pushData(values) {
   );
 }
 
+function chatPushLine(message) {
+  const sender = db.users.find((item) => idOf(item.id) === idOf(message.senderId));
+  const senderName = sender?.name || 'Family';
+  const body = message.audio
+    ? 'Voice message'
+    : message.image
+      ? 'Photo'
+      : message.text || 'New family message';
+  return message.system ? body : `${senderName}: ${body}`;
+}
+
+function latestChatPushLines(houseId) {
+  return db.messages
+    .filter((item) => idOf(item.houseId) === idOf(houseId))
+    .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+    .slice(-3)
+    .map(chatPushLine);
+}
+
 function logPushError(type, error, extra = {}) {
   console.warn(`${type} push failed`, {
     code: error.code,
@@ -497,10 +516,12 @@ async function sendMessagePush({ house, message, sender }) {
     : message.image
       ? 'Photo'
       : message.text || 'New family message';
+  const visibleLines = latestChatPushLines(house.id);
+  const notificationBody = visibleLines.length > 0 ? visibleLines.join('\n') : body;
   try {
     const response = await firebaseMessaging.sendEachForMulticast({
       tokens,
-      notification: { title, body },
+      notification: { title: 'Family chat', body: notificationBody },
       data: pushData({
         type: 'messageCreated',
         messageId: message.id,
@@ -509,26 +530,29 @@ async function sendMessagePush({ house, message, sender }) {
         title,
         body,
         system: message.system ? 'true' : 'false',
+        visibleLines: JSON.stringify(visibleLines),
       }),
       android: {
         priority: 'high',
+        collapseKey: 'hoomy-family-chat',
         notification: {
           channelId: notificationChannels.chatMessages,
           icon: 'ic_notification_house',
           sound: 'message_chime',
           priority: 'high',
           visibility: 'public',
-          tag: `chat-${house.id}`,
+          tag: 'hoomy-family-chat',
         },
       },
       apns: {
         headers: {
           'apns-priority': '10',
           'apns-push-type': 'alert',
+          'apns-collapse-id': 'hoomy-family-chat',
         },
         payload: {
           aps: {
-            alert: { title, body },
+            alert: { title: 'Family chat', body: notificationBody },
             sound: 'message_chime.wav',
             'thread-id': 'com.idea.hoomy.hoomy.FAMILY_CHAT',
           },
