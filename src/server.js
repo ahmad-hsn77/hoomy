@@ -476,6 +476,29 @@ function latestChatPushLines(houseId) {
     .map(chatPushLine);
 }
 
+function normalizeRingTimes(value, dueAt) {
+  const values = Array.isArray(value) ? value : [];
+  const normalized = new Set();
+  values.forEach((item) => {
+    const match = item?.toString().trim().match(/^(\d{1,2}):(\d{1,2})$/);
+    if (!match) return;
+    const hour = Number(match[1]);
+    const minute = Number(match[2]);
+    if (!Number.isInteger(hour) || !Number.isInteger(minute)) return;
+    if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return;
+    normalized.add(`${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`);
+  });
+  if (normalized.size === 0 && dueAt) {
+    const parsedDueAt = new Date(dueAt);
+    if (!Number.isNaN(parsedDueAt.getTime())) {
+      normalized.add(
+        `${parsedDueAt.getHours().toString().padStart(2, '0')}:${parsedDueAt.getMinutes().toString().padStart(2, '0')}`
+      );
+    }
+  }
+  return [...normalized].sort();
+}
+
 function logPushError(type, error, extra = {}) {
   console.warn(`${type} push failed`, {
     code: error.code,
@@ -713,6 +736,7 @@ async function sendReminderPush({ house, reminder, creator }) {
         title: reminder.title,
         body,
         dueAt: reminder.dueAt,
+        ringTimes: JSON.stringify(reminder.ringTimes || []),
         createdBy: creator.id,
         isBirthday: reminder.isBirthday ? 'true' : 'false',
         birthdayMemberId: reminder.birthdayMemberId || '',
@@ -720,10 +744,10 @@ async function sendReminderPush({ house, reminder, creator }) {
       android: {
         priority: 'high',
         notification: {
-          channelId: notificationChannels.reminders,
+          channelId: notificationChannels.needAlerts,
           icon: 'ic_notification_house',
-          sound: 'reminder_ring',
-          priority: 'max',
+          sound: 'default',
+          priority: 'high',
           visibility: 'public',
         },
       },
@@ -738,8 +762,7 @@ async function sendReminderPush({ house, reminder, creator }) {
         payload: {
           aps: {
             alert: { title, body },
-            sound: 'reminder_ring.wav',
-            interruptionLevel: 'time-sensitive',
+            sound: 'default',
           },
         },
       },
@@ -1244,6 +1267,7 @@ app.post('/houses/:houseId/reminders', requireAuth, requireHouseMember, (req, re
     title: req.body.title,
     note: req.body.note || '',
     dueAt: req.body.dueAt,
+    ringTimes: normalizeRingTimes(req.body.ringTimes, req.body.dueAt),
     createdBy: req.user.id,
     isBirthday,
     birthdayMemberId: isBirthday ? birthdayMemberId : null,
@@ -1276,6 +1300,7 @@ app.put('/houses/:houseId/reminders/:reminderId', requireAuth, requireHouseMembe
   reminder.title = req.body.title || reminder.title;
   reminder.note = req.body.note ?? reminder.note;
   reminder.dueAt = req.body.dueAt || reminder.dueAt;
+  reminder.ringTimes = normalizeRingTimes(req.body.ringTimes, reminder.dueAt);
   reminder.isBirthday = isBirthday;
   reminder.birthdayMemberId = isBirthday ? birthdayMemberId : null;
   persistDb();
