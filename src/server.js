@@ -499,6 +499,19 @@ function normalizeRingTimes(value, dueAt) {
   return [...normalized].sort();
 }
 
+function normalizeReminderRecurrence(value) {
+  return ['once', 'daily', 'weekly'].includes(value) ? value : 'once';
+}
+
+function normalizeReminderWeekdays(value, recurrence) {
+  if (recurrence !== 'weekly') return [];
+  const values = Array.isArray(value) ? value : [];
+  return [...new Set(values
+    .map((item) => Number(item))
+    .filter((day) => Number.isInteger(day) && day >= 1 && day <= 7))]
+    .sort((a, b) => a - b);
+}
+
 function logPushError(type, error, extra = {}) {
   console.warn(`${type} push failed`, {
     code: error.code,
@@ -1251,6 +1264,11 @@ app.delete('/houses/:houseId/alerts/:alertId', requireAuth, requireHouseMember, 
 
 app.post('/houses/:houseId/reminders', requireAuth, requireHouseMember, (req, res) => {
   const isBirthday = req.body.isBirthday === true;
+  const recurrence = normalizeReminderRecurrence(req.body.recurrence);
+  const recurrenceWeekdays = normalizeReminderWeekdays(req.body.recurrenceWeekdays, recurrence);
+  if (recurrence === 'weekly' && recurrenceWeekdays.length === 0) {
+    return res.status(400).json({ message: 'Choose at least one reminder day' });
+  }
   const birthdayMemberId = req.body.birthdayMemberId ? idOf(req.body.birthdayMemberId) : null;
   if (isBirthday) {
     if (!birthdayMemberId) {
@@ -1268,6 +1286,8 @@ app.post('/houses/:houseId/reminders', requireAuth, requireHouseMember, (req, re
     note: req.body.note || '',
     dueAt: req.body.dueAt,
     ringTimes: normalizeRingTimes(req.body.ringTimes, req.body.dueAt),
+    recurrence,
+    recurrenceWeekdays,
     createdBy: req.user.id,
     isBirthday,
     birthdayMemberId: isBirthday ? birthdayMemberId : null,
@@ -1286,6 +1306,11 @@ app.put('/houses/:houseId/reminders/:reminderId', requireAuth, requireHouseMembe
   const reminder = db.reminders.find((item) => item.id === req.params.reminderId && item.houseId === req.house.id);
   if (!reminder) return res.status(404).json({ message: 'Reminder not found' });
   const isBirthday = req.body.isBirthday === true;
+  const recurrence = normalizeReminderRecurrence(req.body.recurrence);
+  const recurrenceWeekdays = normalizeReminderWeekdays(req.body.recurrenceWeekdays, recurrence);
+  if (recurrence === 'weekly' && recurrenceWeekdays.length === 0) {
+    return res.status(400).json({ message: 'Choose at least one reminder day' });
+  }
   const birthdayMemberId = req.body.birthdayMemberId ? idOf(req.body.birthdayMemberId) : null;
   if (isBirthday) {
     if (!birthdayMemberId) {
@@ -1301,6 +1326,8 @@ app.put('/houses/:houseId/reminders/:reminderId', requireAuth, requireHouseMembe
   reminder.note = req.body.note ?? reminder.note;
   reminder.dueAt = req.body.dueAt || reminder.dueAt;
   reminder.ringTimes = normalizeRingTimes(req.body.ringTimes, reminder.dueAt);
+  reminder.recurrence = recurrence;
+  reminder.recurrenceWeekdays = recurrenceWeekdays;
   reminder.isBirthday = isBirthday;
   reminder.birthdayMemberId = isBirthday ? birthdayMemberId : null;
   persistDb();
