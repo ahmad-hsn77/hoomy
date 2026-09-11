@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "721383561915",
+    "project_id": "hoomy-267dd",
+    "storage_bucket": "hoomy-267dd.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:721383561915:android:067002e1d0ff23a12ca79e",
+        "android_client_info": {
+          "package_name": "com.idea.hoomy.hoomy"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBXked-jfDEa6LAUJd6k3BBQHhVDhCPShU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -1,0 +1,134 @@
+import '/flutter_flow/flutter_flow_theme.dart';
+import '/flutter_flow/flutter_flow_util.dart';
+import '/flutter_flow/flutter_flow_widgets.dart';
+import 'dart:ui';
+import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
+
+import 'feature_row_model.dart';
+export 'feature_row_model.dart';
+
+class FeatureRowWidget extends StatefulWidget {
+  const FeatureRowWidget({
+    super.key,
+    String? desc,
+    this.icon,
+    String? title,
+    Color? tone,
+  })  : this.desc = desc ??
+            'Never run out of milk again. Track missing items and notify the family in real-time.',
+        this.title = title ?? 'House Needs & Alerts',
+        this.tone = tone ?? const Color(0x00000000);
+
+  final String desc;
+  final Widget? icon;
+  final String title;
+  final Color tone;
+
+  @override
+  State<FeatureRowWidget> createState() => _FeatureRowWidgetState();
+}
+
+class _FeatureRowWidgetState extends State<FeatureRowWidget> {
+  late FeatureRowModel _model;
+
+  @override
+  void setState(VoidCallback callback) {
+    super.setState(callback);
+    _model.onUpdate();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _model = createModel(context, () => FeatureRowModel());
+  }
+
+  @override
+  void dispose() {
+    _model.maybeDispose();
+
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.max,
+      mainAxisAlignment: MainAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            color: valueOrDefault<Color>(
+              widget!.tone,
+              FlutterFlowTheme.of(context).success,
+            ),
+            borderRadius: BorderRadius.circular(12),
+            shape: BoxShape.rectangle,
+          ),
+          child: Container(
+            child: widget!.icon!,
+          ),
+        ),
+        Expanded(
+          flex: 1,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Text(
+                valueOrDefault<String>(
+                  widget!.title,
+                  'House Needs & Alerts',
+                ),
+                style: FlutterFlowTheme.of(context).titleSmall.override(
+                      font: GoogleFonts.plusJakartaSans(
+                        fontWeight:
+                            FlutterFlowTheme.of(context).titleSmall.fontWeight,
+                        fontStyle:
+                            FlutterFlowTheme.of(context).titleSmall.fontStyle,
+                      ),
+                      color: FlutterFlowTheme.of(context).primaryText,
+                      letterSpacing: 0.0,
+                      fontWeight:
+                          FlutterFlowTheme.of(context).titleSmall.fontWeight,
+                      fontStyle:
+                          FlutterFlowTheme.of(context).titleSmall.fontStyle,
+                      lineHeight: 1.4,
+                    ),
+              ),
+              Text(
+                valueOrDefault<String>(
+                  widget!.desc,
+                  'Never run out of milk again. Track missing items and notify the family in real-time.',
+                ),
+                maxLines: 2,
+                style: FlutterFlowTheme.of(context).bodySmall.override(
+                      font: GoogleFonts.outfit(
+                        fontWeight:
+                            FlutterFlowTheme.of(context).bodySmall.fontWeight,
+                        fontStyle:
+                            FlutterFlowTheme.of(context).bodySmall.fontStyle,
+                      ),
+                      color: FlutterFlowTheme.of(context).secondaryText,
+                      letterSpacing: 0.0,
+                      fontWeight:
+                          FlutterFlowTheme.of(context).bodySmall.fontWeight,
+                      fontStyle:
+                          FlutterFlowTheme.of(context).bodySmall.fontStyle,
+                      lineHeight: 1.4,
+                    ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ].divide(SizedBox(height: 4)),
+          ),
+        ),
+      ].divide(SizedBox(width: 16)),
+    );
+  }
+}

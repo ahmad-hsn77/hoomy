@@ -1,0 +1,433 @@
+import '/flutter_flow/flutter_flow_icon_button.dart';
+import '/flutter_flow/flutter_flow_theme.dart';
+import '/flutter_flow/flutter_flow_util.dart';
+import '/flutter_flow/flutter_flow_widgets.dart';
+import '/pages/button/button_widget.dart';
+import '/pages/location_detail_row/location_detail_row_widget.dart';
+import 'dart:ui';
+import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
+
+import 'member_location_detail_model.dart';
+export 'member_location_detail_model.dart';
+
+class MemberLocationDetailWidget extends StatefulWidget {
+  const MemberLocationDetailWidget({super.key});
+
+  static String routeName = 'MemberLocationDetail';
+  static String routePath = '/memberLocationDetail';
+
+  @override
+  State<MemberLocationDetailWidget> createState() =>
+      _MemberLocationDetailWidgetState();
+}
+
+class _MemberLocationDetailWidgetState
+    extends State<MemberLocationDetailWidget> {
+  late MemberLocationDetailModel _model;
+
+  final scaffoldKey = GlobalKey<ScaffoldState>();
+
+  @override
+  void initState() {
+    super.initState();
+    _model = createModel(context, () => MemberLocationDetailModel());
+  }
+
+  @override
+  void dispose() {
+    _model.dispose();
+
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () {
+        FocusScope.of(context).unfocus();
+        FocusManager.instance.primaryFocus?.unfocus();
+      },
+      child: Scaffold(
+        key: scaffoldKey,
+        backgroundColor: FlutterFlowTheme.of(context).primaryBackground,
+        body: Stack(
+          alignment: AlignmentDirectional(-1, -1),
+          children: [
+            Column(
+              mainAxisSize: MainAxisSize.max,
+              mainAxisAlignment: MainAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(
+                  flex: 1,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.only(),
+                    child: BackdropFilter(
+                      filter: ImageFilter.blur(
+                        sigmaX: 4,
+                        sigmaY: 4,
+                      ),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: FlutterFlowTheme.of(context).onWarning40,
+                          shape: BoxShape.rectangle,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            Align(
+              alignment: AlignmentDirectional(0, 0),
+              child: Container(
+                child: Padding(
+                  padding: EdgeInsets.all(24),
+                  child: Container(
+                    child: Container(
+                      width: 340,
+                      decoration: BoxDecoration(
+                        color: FlutterFlowTheme.of(context).secondaryBackground,
+                        borderRadius: BorderRadius.circular(16),
+                        shape: BoxShape.rectangle,
+                        border: Border.all(
+                          color: FlutterFlowTheme.of(context).alternate,
+                          width: 1,
+                        ),
+                      ),
+                      child: Padding(
+                        padding: EdgeInsets.all(24),
+                        child: Container(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            mainAxisAlignment: MainAxisAlignment.start,
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            children: [
+                              Row(
+                                mainAxisSize: MainAxisSize.max,
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                crossAxisAlignment: CrossAxisAlignment.center,
+                                children: [
+                                  Row(
+                                    mainAxisSize: MainAxisSize.max,
+                                    mainAxisAlignment: MainAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.center,
+                                    children: [
+                                      Container(
+                                        width: 44,
+                                        height: 44,
+                                        decoration: BoxDecoration(
+                                          color: FlutterFlowTheme.of(context)
+                                              .tertiary,
+                                          borderRadius:
+                                              BorderRadius.circular(9999),
+                                          shape: BoxShape.rectangle,
+                                        ),
+                                        alignment: AlignmentDirectional(0, 0),
+                                        child: Text(
+                                          'JD',
+                                          style: FlutterFlowTheme.of(context)
+                                              .titleMedium
+                                              .override(
+                                                font:
+                                                    GoogleFonts.plusJakartaSans(
+                                                  fontWeight:
+                                                      FlutterFlowTheme.of(
+                                                              context)
+                                                          .titleMedium
+                                                          .fontWeight,
+                                                  fontStyle:
+                                                      FlutterFlowTheme.of(
+                                                              context)
+                                                          .titleMedium
+                                                          .fontStyle,
+                                                ),
+                                                color:
+                                                    FlutterFlowTheme.of(context)
+                                                        .onSurface,
+                                                letterSpacing: 0.0,
+                                                fontWeight:
+                                                    FlutterFlowTheme.of(context)
+                                                        .titleMedium
+                                                        .fontWeight,
+                                                fontStyle:
+                                                    FlutterFlowTheme.of(context)
+                                                        .titleMedium
+                                                        .fontStyle,
+                                                lineHeight: 1.4,
+                                              ),
+                                        ),
+                                      ),
+                                      Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.start,
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.center,
+                                        children: [
+                                          Text(
+                                            'John Doe',
+                                            style: FlutterFlowTheme.of(context)
+                                                .titleLarge
+                                                .override(
+                                                  font: GoogleFonts
+                                                      .plusJakartaSans(
+                                                    fontWeight: FontWeight.bold,
+                                                    fontStyle:
+                                                        FlutterFlowTheme.of(
+                                                                context)
+                                                            .titleLarge
+                                                            .fontStyle,
+                                                  ),
+                                                  letterSpacing: 0.0,
+                                                  fontWeight: FontWeight.bold,
+                                                  fontStyle:
+                                                      FlutterFlowTheme.of(
+                                                              context)
+                                                          .titleLarge
+                                                          .fontStyle,
+                                                  lineHeight: 1.4,
+                                                ),
+                                          ),
+                                          Row(
+                                            mainAxisSize: MainAxisSize.max,
+                                            mainAxisAlignment:
+                                                MainAxisAlignment.start,
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.center,
+                                            children: [
+                                              Container(
+                                                width: 8,
+                                                height: 8,
+                                                decoration: BoxDecoration(
+                                                  color: FlutterFlowTheme.of(
+                                                          context)
+                                                      .success,
+                                                  borderRadius:
+                                                      BorderRadius.circular(
+                                                          9999),
+                                                  shape: BoxShape.rectangle,
+                                                ),
+                                              ),
+                                              Text(
+                                                'Outside • Working',
+                                                style: FlutterFlowTheme.of(
+                                                        context)
+                                                    .labelSmall
+                                                    .override(
+                                                      font: GoogleFonts.outfit(
+                                                        fontWeight:
+                                                            FlutterFlowTheme.of(
+                                                                    context)
+                                                                .labelSmall
+                                                                .fontWeight,
+                                                        fontStyle:
+                                                            FlutterFlowTheme.of(
+                                                                    context)
+                                                                .labelSmall
+                                                                .fontStyle,
+                                                      ),
+                                                      color:
+                                                          FlutterFlowTheme.of(
+                                                                  context)
+                                                              .secondaryText,
+                                                      letterSpacing: 0.0,
+                                                      fontWeight:
+                                                          FlutterFlowTheme.of(
+                                                                  context)
+                                                              .labelSmall
+                                                              .fontWeight,
+                                                      fontStyle:
+                                                          FlutterFlowTheme.of(
+                                                                  context)
+                                                              .labelSmall
+                                                              .fontStyle,
+                                                      lineHeight: 1.2,
+                                                    ),
+                                              ),
+                                            ].divide(SizedBox(width: 4)),
+                                          ),
+                                        ].divide(SizedBox(height: 4)),
+                                      ),
+                                    ].divide(SizedBox(width: 8)),
+                                  ),
+                                  FlutterFlowIconButton(
+                                    borderRadius: 8,
+                                    buttonSize: 40,
+                                    fillColor: Colors.transparent,
+                                    icon: Icon(
+                                      Icons.close_rounded,
+                                      color: FlutterFlowTheme.of(context)
+                                          .secondaryText,
+                                      size: 20,
+                                    ),
+                                    onPressed: () {
+                                      print('IconButton pressed ...');
+                                    },
+                                  ),
+                                ],
+                              ),
+                              Divider(
+                                height: 16,
+                                thickness: 1,
+                                indent: 0,
+                                endIndent: 0,
+                                color: FlutterFlowTheme.of(context).alternate,
+                              ),
+                              Column(
+                                mainAxisSize: MainAxisSize.min,
+                                mainAxisAlignment: MainAxisAlignment.start,
+                                crossAxisAlignment: CrossAxisAlignment.center,
+                                children: [
+                                  wrapWithModel(
+                                    model: _model.locationDetailRowModel1,
+                                    updateCallback: () => safeSetState(() {}),
+                                    child: LocationDetailRowWidget(
+                                      icon: Icon(
+                                        Icons.location_on_rounded,
+                                        color: FlutterFlowTheme.of(context)
+                                            .primary,
+                                        size: 20,
+                                      ),
+                                      label: 'Coordinates',
+                                      value: '24.7136° N, 46.6753° E',
+                                    ),
+                                  ),
+                                  wrapWithModel(
+                                    model: _model.locationDetailRowModel2,
+                                    updateCallback: () => safeSetState(() {}),
+                                    child: LocationDetailRowWidget(
+                                      icon: Icon(
+                                        Icons.schedule_rounded,
+                                        color: FlutterFlowTheme.of(context)
+                                            .primary,
+                                        size: 20,
+                                      ),
+                                      label: 'Last Updated',
+                                      value: 'Today, 10:42 AM (2 mins ago)',
+                                    ),
+                                  ),
+                                  wrapWithModel(
+                                    model: _model.locationDetailRowModel3,
+                                    updateCallback: () => safeSetState(() {}),
+                                    child: LocationDetailRowWidget(
+                                      icon: Icon(
+                                        Icons.my_location_rounded,
+                                        color: FlutterFlowTheme.of(context)
+                                            .primary,
+                                        size: 20,
+                                      ),
+                                      label: 'Accuracy',
+                                      value: 'Within 15 meters',
+                                    ),
+                                  ),
+                                ].divide(SizedBox(height: 16)),
+                              ),
+                              Column(
+                                mainAxisSize: MainAxisSize.min,
+                                mainAxisAlignment: MainAxisAlignment.start,
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  wrapWithModel(
+                                    model: _model.buttonModel1,
+                                    updateCallback: () => safeSetState(() {}),
+                                    child: ButtonWidget(
+                                      icon: Icon(
+                                        Icons.map_rounded,
+                                        color: FlutterFlowTheme.of(context)
+                                            .primaryText,
+                                        size: 24,
+                                      ),
+                                      iconPresent: true,
+                                      iconEndPresent: false,
+                                      content: 'Open Google Maps',
+                                      variant: 'primary',
+                                      size: 'medium',
+                                      fullWidth: true,
+                                      loading: false,
+                                      disabled: false,
+                                    ),
+                                  ),
+                                  wrapWithModel(
+                                    model: _model.buttonModel2,
+                                    updateCallback: () => safeSetState(() {}),
+                                    child: ButtonWidget(
+                                      icon: Icon(
+                                        Icons.sync_rounded,
+                                        color: FlutterFlowTheme.of(context)
+                                            .primaryText,
+                                        size: 24,
+                                      ),
+                                      iconPresent: true,
+                                      iconEndPresent: false,
+                                      content: 'Request Live Update',
+                                      variant: 'outline',
+                                      size: 'medium',
+                                      fullWidth: true,
+                                      loading: false,
+                                      disabled: false,
+                                    ),
+                                  ),
+                                ].divide(SizedBox(height: 8)),
+                              ),
+                              Row(
+                                mainAxisSize: MainAxisSize.max,
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                crossAxisAlignment: CrossAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    Icons.info_outline_rounded,
+                                    color: FlutterFlowTheme.of(context)
+                                        .secondaryText,
+                                    size: 14,
+                                  ),
+                                  Text(
+                                    'Location is shared with family members only',
+                                    style: FlutterFlowTheme.of(context)
+                                        .labelSmall
+                                        .override(
+                                          font: GoogleFonts.outfit(
+                                            fontWeight:
+                                                FlutterFlowTheme.of(context)
+                                                    .labelSmall
+                                                    .fontWeight,
+                                            fontStyle:
+                                                FlutterFlowTheme.of(context)
+                                                    .labelSmall
+                                                    .fontStyle,
+                                          ),
+                                          color: FlutterFlowTheme.of(context)
+                                              .secondaryText,
+                                          letterSpacing: 0.0,
+                                          fontWeight:
+                                              FlutterFlowTheme.of(context)
+                                                  .labelSmall
+                                                  .fontWeight,
+                                          fontStyle:
+                                              FlutterFlowTheme.of(context)
+                                                  .labelSmall
+                                                  .fontStyle,
+                                          lineHeight: 1.2,
+                                        ),
+                                  ),
+                                ].divide(SizedBox(width: 4)),
+                              ),
+                            ].divide(SizedBox(height: 24)),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

@@ -1,0 +1,143 @@
+import '/flutter_flow/flutter_flow_theme.dart';
+import '/flutter_flow/flutter_flow_util.dart';
+import '/flutter_flow/flutter_flow_widgets.dart';
+import '/pages/button/button_widget.dart';
+import 'dart:ui';
+import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
+
+import 'settings_section_child5_model.dart';
+export 'settings_section_child5_model.dart';
+
+class SettingsSectionChild5Widget extends StatefulWidget {
+  const SettingsSectionChild5Widget({super.key});
+
+  @override
+  State<SettingsSectionChild5Widget> createState() =>
+      _SettingsSectionChild5WidgetState();
+}
+
+class _SettingsSectionChild5WidgetState
+    extends State<SettingsSectionChild5Widget> {
+  late SettingsSectionChild5Model _model;
+
+  @override
+  void setState(VoidCallback callback) {
+    super.setState(callback);
+    _model.onUpdate();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _model = createModel(context, () => SettingsSectionChild5Model());
+  }
+
+  @override
+  void dispose() {
+    _model.maybeDispose();
+
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      mainAxisAlignment: MainAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Container(
+          decoration: BoxDecoration(
+            color: FlutterFlowTheme.of(context).secondaryBackground,
+            borderRadius: BorderRadius.circular(8),
+            shape: BoxShape.rectangle,
+          ),
+          child: Padding(
+            padding: EdgeInsets.all(8),
+            child: Container(
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.call_rounded,
+                    color: FlutterFlowTheme.of(context).onSurface,
+                    size: 20,
+                  ),
+                  Text(
+                    'Call Dad (Preview)',
+                    style: FlutterFlowTheme.of(context).bodySmall.override(
+                          font: GoogleFonts.outfit(
+                            fontWeight: FlutterFlowTheme.of(context)
+                                .bodySmall
+                                .fontWeight,
+                            fontStyle: FlutterFlowTheme.of(context)
+                                .bodySmall
+                                .fontStyle,
+                          ),
+                          letterSpacing: 0.0,
+                          fontWeight:
+                              FlutterFlowTheme.of(context).bodySmall.fontWeight,
+                          fontStyle:
+                              FlutterFlowTheme.of(context).bodySmall.fontStyle,
+                          lineHeight: 1.4,
+                        ),
+                  ),
+                ].divide(SizedBox(width: 8)),
+              ),
+            ),
+          ),
+        ),
+        Row(
+          mainAxisSize: MainAxisSize.max,
+          mainAxisAlignment: MainAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Expanded(
+              flex: 1,
+              child: wrapWithModel(
+                model: _model.buttonModel1,
+                updateCallback: () => safeSetState(() {}),
+                child: ButtonWidget(
+                  iconPresent: false,
+                  iconEndPresent: false,
+                  content: 'View All',
+                  variant: 'ghost',
+                  size: 'medium',
+                  fullWidth: false,
+                  loading: false,
+                  disabled: false,
+                ),
+              ),
+            ),
+            Expanded(
+              flex: 1,
+              child: wrapWithModel(
+                model: _model.buttonModel2,
+                updateCallback: () => safeSetState(() {}),
+                child: ButtonWidget(
+                  icon: Icon(
+                    Icons.add,
+                    color: FlutterFlowTheme.of(context).primaryText,
+                    size: 24,
+                  ),
+                  iconPresent: true,
+                  iconEndPresent: false,
+                  content: 'Add New',
+                  variant: 'outline',
+                  size: 'medium',
+                  fullWidth: false,
+                  loading: false,
+                  disabled: false,
+                ),
+              ),
+            ),
+          ].divide(SizedBox(width: 16)),
+        ),
+      ].divide(SizedBox(height: 16)),
+    );
+  }
+}

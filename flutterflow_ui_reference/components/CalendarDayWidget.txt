@@ -1,0 +1,173 @@
+import '/flutter_flow/flutter_flow_theme.dart';
+import '/flutter_flow/flutter_flow_util.dart';
+import '/flutter_flow/flutter_flow_widgets.dart';
+import 'dart:ui';
+import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
+
+import 'calendar_day_model.dart';
+export 'calendar_day_model.dart';
+
+class CalendarDayWidget extends StatefulWidget {
+  const CalendarDayWidget({
+    super.key,
+    String? date,
+    String? day,
+    String? hasEvent,
+    bool? hasEventPresent,
+    bool? isToday,
+    bool? selected,
+  })  : this.date = date ?? '23',
+        this.day = day ?? 'Mon',
+        this.hasEvent = hasEvent ?? 'Has Event',
+        this.hasEventPresent = hasEventPresent ?? true,
+        this.isToday = isToday ?? false,
+        this.selected = selected ?? true;
+
+  final String date;
+  final String day;
+  final String hasEvent;
+  final bool hasEventPresent;
+  final bool isToday;
+  final bool selected;
+
+  @override
+  State<CalendarDayWidget> createState() => _CalendarDayWidgetState();
+}
+
+class _CalendarDayWidgetState extends State<CalendarDayWidget> {
+  late CalendarDayModel _model;
+
+  @override
+  void setState(VoidCallback callback) {
+    super.setState(callback);
+    _model.onUpdate();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _model = createModel(context, () => CalendarDayModel());
+  }
+
+  @override
+  void dispose() {
+    _model.maybeDispose();
+
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: valueOrDefault<Color>(
+          () {
+            if (valueOrDefault<bool>(
+              widget!.selected,
+              true,
+            )) {
+              return FlutterFlowTheme.of(context).primary;
+            } else if (valueOrDefault<bool>(
+              widget!.isToday,
+              false,
+            )) {
+              return FlutterFlowTheme.of(context).primary10;
+            } else {
+              return Colors.transparent;
+            }
+          }(),
+          FlutterFlowTheme.of(context).primary,
+        ),
+        borderRadius: BorderRadius.circular(12),
+        shape: BoxShape.rectangle,
+      ),
+      child: Padding(
+        padding: EdgeInsetsDirectional.fromSTEB(4, 8, 4, 8),
+        child: Container(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Text(
+                valueOrDefault<String>(
+                  widget!.day,
+                  'Mon',
+                ),
+                style: FlutterFlowTheme.of(context).labelSmall.override(
+                      font: GoogleFonts.outfit(
+                        fontWeight:
+                            FlutterFlowTheme.of(context).labelSmall.fontWeight,
+                        fontStyle:
+                            FlutterFlowTheme.of(context).labelSmall.fontStyle,
+                      ),
+                      color: valueOrDefault<Color>(
+                        valueOrDefault<bool>(
+                          widget!.selected,
+                          true,
+                        )
+                            ? FlutterFlowTheme.of(context).onPrimary
+                            : FlutterFlowTheme.of(context).secondaryText,
+                        FlutterFlowTheme.of(context).onPrimary,
+                      ),
+                      letterSpacing: 0.0,
+                      fontWeight:
+                          FlutterFlowTheme.of(context).labelSmall.fontWeight,
+                      fontStyle:
+                          FlutterFlowTheme.of(context).labelSmall.fontStyle,
+                      lineHeight: 1.2,
+                    ),
+              ),
+              Text(
+                valueOrDefault<String>(
+                  widget!.date,
+                  '23',
+                ),
+                style: FlutterFlowTheme.of(context).titleSmall.override(
+                      font: GoogleFonts.plusJakartaSans(
+                        fontWeight: FontWeight.bold,
+                        fontStyle:
+                            FlutterFlowTheme.of(context).titleSmall.fontStyle,
+                      ),
+                      color: valueOrDefault<Color>(
+                        valueOrDefault<bool>(
+                          widget!.selected,
+                          true,
+                        )
+                            ? FlutterFlowTheme.of(context).onPrimary
+                            : FlutterFlowTheme.of(context).primaryText,
+                        FlutterFlowTheme.of(context).onPrimary,
+                      ),
+                      letterSpacing: 0.0,
+                      fontWeight: FontWeight.bold,
+                      fontStyle:
+                          FlutterFlowTheme.of(context).titleSmall.fontStyle,
+                      lineHeight: 1.4,
+                    ),
+              ),
+              Container(
+                width: 4,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: valueOrDefault<Color>(
+                    valueOrDefault<bool>(
+                      widget!.selected,
+                      true,
+                    )
+                        ? FlutterFlowTheme.of(context).onPrimary
+                        : FlutterFlowTheme.of(context).tertiary,
+                    FlutterFlowTheme.of(context).onPrimary,
+                  ),
+                  borderRadius: BorderRadius.circular(9999),
+                  shape: BoxShape.rectangle,
+                ),
+              ),
+            ].divide(SizedBox(height: 4)),
+          ),
+        ),
+      ),
+    );
+  }
+}

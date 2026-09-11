@@ -1,0 +1,108 @@
+import '/flutter_flow/flutter_flow_theme.dart';
+import '/flutter_flow/flutter_flow_util.dart';
+import '/flutter_flow/flutter_flow_widgets.dart';
+import '/pages/settings_row/settings_row_widget.dart';
+import '/pages/switch_component/switch_component_widget.dart';
+import 'dart:ui';
+import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
+
+import 'settings_section_child3_model.dart';
+export 'settings_section_child3_model.dart';
+
+class SettingsSectionChild3Widget extends StatefulWidget {
+  const SettingsSectionChild3Widget({super.key});
+
+  @override
+  State<SettingsSectionChild3Widget> createState() =>
+      _SettingsSectionChild3WidgetState();
+}
+
+class _SettingsSectionChild3WidgetState
+    extends State<SettingsSectionChild3Widget> {
+  late SettingsSectionChild3Model _model;
+
+  @override
+  void setState(VoidCallback callback) {
+    super.setState(callback);
+    _model.onUpdate();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _model = createModel(context, () => SettingsSectionChild3Model());
+  }
+
+  @override
+  void dispose() {
+    _model.maybeDispose();
+
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      mainAxisAlignment: MainAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        wrapWithModel(
+          model: _model.switchModel1,
+          updateCallback: () => safeSetState(() {}),
+          child: SwitchComponentWidget(
+            label: 'My Inside/Outside Status',
+            labelPresent: true,
+            variant: 'Android',
+            active: true,
+          ),
+        ),
+        Padding(
+          padding: EdgeInsetsDirectional.fromSTEB(0, 4, 0, 4),
+          child: Container(
+            child: Divider(
+              height: 16,
+              thickness: 1,
+              indent: 0,
+              endIndent: 0,
+              color: FlutterFlowTheme.of(context).alternate,
+            ),
+          ),
+        ),
+        wrapWithModel(
+          model: _model.switchModel2,
+          updateCallback: () => safeSetState(() {}),
+          child: SwitchComponentWidget(
+            label: 'Auto Update Status',
+            labelPresent: true,
+            variant: 'Android',
+            active: true,
+          ),
+        ),
+        Padding(
+          padding: EdgeInsetsDirectional.fromSTEB(0, 4, 0, 4),
+          child: Container(
+            child: Divider(
+              height: 16,
+              thickness: 1,
+              indent: 0,
+              endIndent: 0,
+              color: FlutterFlowTheme.of(context).alternate,
+            ),
+          ),
+        ),
+        wrapWithModel(
+          model: _model.settingsRowModel,
+          updateCallback: () => safeSetState(() {}),
+          child: SettingsRowWidget(
+            label: 'Update House Base Location',
+            isLast: true,
+            value: 'sweet_home',
+          ),
+        ),
+      ],
+    );
+  }
+}

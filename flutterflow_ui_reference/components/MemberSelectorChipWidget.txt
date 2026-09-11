@@ -1,0 +1,134 @@
+import '/flutter_flow/flutter_flow_theme.dart';
+import '/flutter_flow/flutter_flow_util.dart';
+import '/flutter_flow/flutter_flow_widgets.dart';
+import 'dart:ui';
+import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
+
+import 'member_selector_chip_model.dart';
+export 'member_selector_chip_model.dart';
+
+class MemberSelectorChipWidget extends StatefulWidget {
+  const MemberSelectorChipWidget({
+    super.key,
+    String? name,
+    bool? selected,
+  })  : this.name = name ?? 'Dad',
+        this.selected = selected ?? false;
+
+  final String name;
+  final bool selected;
+
+  @override
+  State<MemberSelectorChipWidget> createState() =>
+      _MemberSelectorChipWidgetState();
+}
+
+class _MemberSelectorChipWidgetState extends State<MemberSelectorChipWidget> {
+  late MemberSelectorChipModel _model;
+
+  @override
+  void setState(VoidCallback callback) {
+    super.setState(callback);
+    _model.onUpdate();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _model = createModel(context, () => MemberSelectorChipModel());
+  }
+
+  @override
+  void dispose() {
+    _model.maybeDispose();
+
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: valueOrDefault<Color>(
+          valueOrDefault<bool>(
+            widget!.selected,
+            false,
+          )
+              ? FlutterFlowTheme.of(context).primary
+              : FlutterFlowTheme.of(context).secondaryBackground,
+          FlutterFlowTheme.of(context).secondaryBackground,
+        ),
+        borderRadius: BorderRadius.circular(9999),
+        shape: BoxShape.rectangle,
+        border: Border.all(
+          color: valueOrDefault<Color>(
+            valueOrDefault<bool>(
+              widget!.selected,
+              false,
+            )
+                ? FlutterFlowTheme.of(context).primary
+                : FlutterFlowTheme.of(context).alternate,
+            FlutterFlowTheme.of(context).alternate,
+          ),
+          width: valueOrDefault<double>(
+            valueOrDefault<bool>(
+              widget!.selected,
+              false,
+            )
+                ? 1.0
+                : 1.0,
+            1.0,
+          ),
+        ),
+      ),
+      child: Padding(
+        padding: EdgeInsetsDirectional.fromSTEB(16, 6, 16, 6),
+        child: Container(
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Text(
+                valueOrDefault<String>(
+                  widget!.name,
+                  'Dad',
+                ),
+                style: FlutterFlowTheme.of(context).labelMedium.override(
+                      font: GoogleFonts.outfit(
+                        fontWeight:
+                            FlutterFlowTheme.of(context).labelMedium.fontWeight,
+                        fontStyle:
+                            FlutterFlowTheme.of(context).labelMedium.fontStyle,
+                      ),
+                      color: valueOrDefault<Color>(
+                        valueOrDefault<bool>(
+                          widget!.selected,
+                          false,
+                        )
+                            ? FlutterFlowTheme.of(context).onPrimary
+                            : FlutterFlowTheme.of(context).primaryText,
+                        FlutterFlowTheme.of(context).primaryText,
+                      ),
+                      letterSpacing: 0.0,
+                      fontWeight:
+                          FlutterFlowTheme.of(context).labelMedium.fontWeight,
+                      fontStyle:
+                          FlutterFlowTheme.of(context).labelMedium.fontStyle,
+                      lineHeight: 1.3,
+                    ),
+              ),
+              Icon(
+                Icons.check_rounded,
+                color: FlutterFlowTheme.of(context).onPrimary,
+                size: 14,
+              ),
+            ].divide(SizedBox(width: 4)),
+          ),
+        ),
+      ),
+    );
+  }
+}

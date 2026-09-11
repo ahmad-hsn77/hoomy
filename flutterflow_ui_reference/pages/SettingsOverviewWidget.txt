@@ -1,0 +1,354 @@
+import '/flutter_flow/flutter_flow_icon_button.dart';
+import '/flutter_flow/flutter_flow_theme.dart';
+import '/flutter_flow/flutter_flow_util.dart';
+import '/flutter_flow/flutter_flow_widgets.dart';
+import '/pages/settings_section/settings_section_widget.dart';
+import '/pages/settings_section_child/settings_section_child_widget.dart';
+import '/pages/settings_section_child2/settings_section_child2_widget.dart';
+import '/pages/settings_section_child3/settings_section_child3_widget.dart';
+import '/pages/settings_section_child4/settings_section_child4_widget.dart';
+import '/pages/settings_section_child5/settings_section_child5_widget.dart';
+import '/pages/settings_section_child6/settings_section_child6_widget.dart';
+import 'dart:ui';
+import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
+
+import 'settings_overview_model.dart';
+export 'settings_overview_model.dart';
+
+class SettingsOverviewWidget extends StatefulWidget {
+  const SettingsOverviewWidget({super.key});
+
+  static String routeName = 'SettingsOverview';
+  static String routePath = '/settingsOverview';
+
+  @override
+  State<SettingsOverviewWidget> createState() => _SettingsOverviewWidgetState();
+}
+
+class _SettingsOverviewWidgetState extends State<SettingsOverviewWidget> {
+  late SettingsOverviewModel _model;
+
+  final scaffoldKey = GlobalKey<ScaffoldState>();
+
+  @override
+  void initState() {
+    super.initState();
+    _model = createModel(context, () => SettingsOverviewModel());
+  }
+
+  @override
+  void dispose() {
+    _model.dispose();
+
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () {
+        FocusScope.of(context).unfocus();
+        FocusManager.instance.primaryFocus?.unfocus();
+      },
+      child: Scaffold(
+        key: scaffoldKey,
+        backgroundColor: FlutterFlowTheme.of(context).primaryBackground,
+        body: Column(
+          mainAxisSize: MainAxisSize.max,
+          mainAxisAlignment: MainAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Container(
+              decoration: BoxDecoration(
+                color: FlutterFlowTheme.of(context).secondaryBackground,
+                shape: BoxShape.rectangle,
+              ),
+              child: Padding(
+                padding: EdgeInsetsDirectional.fromSTEB(24, 24, 24, 16),
+                child: Container(
+                  child: Row(
+                    mainAxisSize: MainAxisSize.max,
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Row(
+                        mainAxisSize: MainAxisSize.max,
+                        mainAxisAlignment: MainAxisAlignment.start,
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(12),
+                            child: Container(
+                              width: 44,
+                              height: 44,
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(12),
+                                shape: BoxShape.rectangle,
+                              ),
+                              child: Icon(
+                                Icons.settings_rounded,
+                                color: FlutterFlowTheme.of(context).primary,
+                                size: 24,
+                              ),
+                            ),
+                          ),
+                          Text(
+                            'Settings',
+                            style: FlutterFlowTheme.of(context)
+                                .headlineMedium
+                                .override(
+                                  font: GoogleFonts.plusJakartaSans(
+                                    fontWeight: FontWeight.bold,
+                                    fontStyle: FlutterFlowTheme.of(context)
+                                        .headlineMedium
+                                        .fontStyle,
+                                  ),
+                                  letterSpacing: 0.0,
+                                  fontWeight: FontWeight.bold,
+                                  fontStyle: FlutterFlowTheme.of(context)
+                                      .headlineMedium
+                                      .fontStyle,
+                                  lineHeight: 1.3,
+                                ),
+                          ),
+                        ].divide(SizedBox(width: 16)),
+                      ),
+                      Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: FlutterFlowTheme.of(context).tertiary,
+                          shape: BoxShape.circle,
+                        ),
+                        alignment: AlignmentDirectional(0, 0),
+                        child: Text(
+                          'S',
+                          textAlign: TextAlign.center,
+                          maxLines: 1,
+                          style: FlutterFlowTheme.of(context)
+                              .labelMedium
+                              .override(
+                                font: GoogleFonts.outfit(
+                                  fontWeight: FontWeight.w600,
+                                  fontStyle: FlutterFlowTheme.of(context)
+                                      .labelMedium
+                                      .fontStyle,
+                                ),
+                                color: FlutterFlowTheme.of(context).onAccent,
+                                fontSize: 15.2,
+                                letterSpacing: 0.0,
+                                fontWeight: FontWeight.w600,
+                                fontStyle: FlutterFlowTheme.of(context)
+                                    .labelMedium
+                                    .fontStyle,
+                                lineHeight: 1.3,
+                              ),
+                          overflow: TextOverflow.clip,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            Expanded(
+              flex: 1,
+              child: SingleChildScrollView(
+                primary: false,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Padding(
+                      padding: EdgeInsets.all(24),
+                      child: Container(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          mainAxisAlignment: MainAxisAlignment.start,
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            wrapWithModel(
+                              model: _model.settingsSectionModel1,
+                              updateCallback: () => safeSetState(() {}),
+                              child: SettingsSectionWidget(
+                                icon: Icon(
+                                  Icons.public_rounded,
+                                  color: FlutterFlowTheme.of(context).onPrimary,
+                                  size: 18,
+                                ),
+                                title: 'Language',
+                                tone: Colors.purple,
+                                child: () => SettingsSectionChildWidget(),
+                              ),
+                            ),
+                            wrapWithModel(
+                              model: _model.settingsSectionModel2,
+                              updateCallback: () => safeSetState(() {}),
+                              child: SettingsSectionWidget(
+                                icon: Icon(
+                                  Icons.home_rounded,
+                                  color: FlutterFlowTheme.of(context).onPrimary,
+                                  size: 18,
+                                ),
+                                title: 'House Management',
+                                tone: FlutterFlowTheme.of(context).primary,
+                                child: () => SettingsSectionChild2Widget(),
+                              ),
+                            ),
+                            wrapWithModel(
+                              model: _model.settingsSectionModel3,
+                              updateCallback: () => safeSetState(() {}),
+                              child: SettingsSectionWidget(
+                                icon: Icon(
+                                  Icons.location_on_rounded,
+                                  color: FlutterFlowTheme.of(context).onPrimary,
+                                  size: 18,
+                                ),
+                                title: 'Location & Privacy',
+                                tone: FlutterFlowTheme.of(context).tertiary,
+                                child: () => SettingsSectionChild3Widget(),
+                              ),
+                            ),
+                            wrapWithModel(
+                              model: _model.settingsSectionModel4,
+                              updateCallback: () => safeSetState(() {}),
+                              child: SettingsSectionWidget(
+                                icon: Icon(
+                                  Icons.notifications_active_rounded,
+                                  color: FlutterFlowTheme.of(context).onPrimary,
+                                  size: 18,
+                                ),
+                                title: 'Notifications',
+                                tone: FlutterFlowTheme.of(context).info,
+                                child: () => SettingsSectionChild4Widget(),
+                              ),
+                            ),
+                            wrapWithModel(
+                              model: _model.settingsSectionModel5,
+                              updateCallback: () => safeSetState(() {}),
+                              child: SettingsSectionWidget(
+                                icon: Icon(
+                                  Icons.bolt_rounded,
+                                  color: FlutterFlowTheme.of(context).onPrimary,
+                                  size: 18,
+                                ),
+                                title: 'Shortcuts',
+                                tone: Color(0xFF3F51B5),
+                                child: () => SettingsSectionChild5Widget(),
+                              ),
+                            ),
+                            wrapWithModel(
+                              model: _model.settingsSectionModel6,
+                              updateCallback: () => safeSetState(() {}),
+                              child: SettingsSectionWidget(
+                                icon: Icon(
+                                  Icons.person_rounded,
+                                  color: FlutterFlowTheme.of(context).onPrimary,
+                                  size: 18,
+                                ),
+                                title: 'App & Account',
+                                tone: FlutterFlowTheme.of(context).error,
+                                child: () => SettingsSectionChild6Widget(),
+                              ),
+                            ),
+                            Container(
+                              height: 40,
+                            ),
+                          ].divide(SizedBox(height: 24)),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            Align(
+              alignment: AlignmentDirectional(0, 1),
+              child: Container(
+                child: Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Container(
+                    child: Container(
+                      height: 72,
+                      decoration: BoxDecoration(
+                        color: FlutterFlowTheme.of(context).secondaryBackground,
+                        borderRadius: BorderRadius.circular(24),
+                        shape: BoxShape.rectangle,
+                        border: Border.all(
+                          color: FlutterFlowTheme.of(context).alternate,
+                          width: 1,
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.max,
+                        mainAxisAlignment: MainAxisAlignment.spaceAround,
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          FlutterFlowIconButton(
+                            borderRadius: 8,
+                            buttonSize: 44,
+                            fillColor: Colors.transparent,
+                            icon: Icon(
+                              Icons.home_rounded,
+                              color: FlutterFlowTheme.of(context).accent3,
+                              size: 28,
+                            ),
+                            onPressed: () {
+                              print('IconButton pressed ...');
+                            },
+                          ),
+                          FlutterFlowIconButton(
+                            borderRadius: 8,
+                            buttonSize: 44,
+                            fillColor: Colors.transparent,
+                            icon: Icon(
+                              Icons.forum_rounded,
+                              color: FlutterFlowTheme.of(context).accent3,
+                              size: 28,
+                            ),
+                            onPressed: () {
+                              print('IconButton pressed ...');
+                            },
+                          ),
+                          FlutterFlowIconButton(
+                            borderRadius: 8,
+                            buttonSize: 44,
+                            fillColor: Colors.transparent,
+                            icon: Icon(
+                              Icons.event_note_rounded,
+                              color: FlutterFlowTheme.of(context).accent3,
+                              size: 28,
+                            ),
+                            onPressed: () {
+                              print('IconButton pressed ...');
+                            },
+                          ),
+                          FlutterFlowIconButton(
+                            borderRadius: 8,
+                            buttonSize: 44,
+                            fillColor: Colors.transparent,
+                            icon: Icon(
+                              Icons.settings_rounded,
+                              color: FlutterFlowTheme.of(context).primary,
+                              size: 28,
+                            ),
+                            onPressed: () {
+                              print('IconButton pressed ...');
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

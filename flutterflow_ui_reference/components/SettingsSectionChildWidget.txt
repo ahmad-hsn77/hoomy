@@ -1,0 +1,61 @@
+import '/flutter_flow/flutter_flow_theme.dart';
+import '/flutter_flow/flutter_flow_util.dart';
+import '/flutter_flow/flutter_flow_widgets.dart';
+import '/pages/tab_group/tab_group_widget.dart';
+import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
+
+import 'settings_section_child_model.dart';
+export 'settings_section_child_model.dart';
+
+class SettingsSectionChildWidget extends StatefulWidget {
+  const SettingsSectionChildWidget({super.key});
+
+  @override
+  State<SettingsSectionChildWidget> createState() =>
+      _SettingsSectionChildWidgetState();
+}
+
+class _SettingsSectionChildWidgetState
+    extends State<SettingsSectionChildWidget> {
+  late SettingsSectionChildModel _model;
+
+  @override
+  void setState(VoidCallback callback) {
+    super.setState(callback);
+    _model.onUpdate();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _model = createModel(context, () => SettingsSectionChildModel());
+  }
+
+  @override
+  void dispose() {
+    _model.maybeDispose();
+
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return wrapWithModel(
+      model: _model.tabGroupModel,
+      updateCallback: () => safeSetState(() {}),
+      child: TabGroupWidget(
+        label2: 'العربية',
+        label2Present: true,
+        label3: 'Reports',
+        label3Present: true,
+        label4: '',
+        label4Present: false,
+        label5: '',
+        label5Present: false,
+        label1: 'English',
+      ),
+    );
+  }
+}

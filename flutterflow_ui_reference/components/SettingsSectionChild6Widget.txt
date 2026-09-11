@@ -1,0 +1,95 @@
+import '/flutter_flow/flutter_flow_theme.dart';
+import '/flutter_flow/flutter_flow_util.dart';
+import '/flutter_flow/flutter_flow_widgets.dart';
+import '/pages/button/button_widget.dart';
+import '/pages/settings_row/settings_row_widget.dart';
+import 'dart:ui';
+import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
+
+import 'settings_section_child6_model.dart';
+export 'settings_section_child6_model.dart';
+
+class SettingsSectionChild6Widget extends StatefulWidget {
+  const SettingsSectionChild6Widget({super.key});
+
+  @override
+  State<SettingsSectionChild6Widget> createState() =>
+      _SettingsSectionChild6WidgetState();
+}
+
+class _SettingsSectionChild6WidgetState
+    extends State<SettingsSectionChild6Widget> {
+  late SettingsSectionChild6Model _model;
+
+  @override
+  void setState(VoidCallback callback) {
+    super.setState(callback);
+    _model.onUpdate();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _model = createModel(context, () => SettingsSectionChild6Model());
+  }
+
+  @override
+  void dispose() {
+    _model.maybeDispose();
+
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      mainAxisAlignment: MainAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        wrapWithModel(
+          model: _model.settingsRowModel1,
+          updateCallback: () => safeSetState(() {}),
+          child: SettingsRowWidget(
+            label: 'About Hoomy',
+            isLast: false,
+            value: 'sweet_home',
+          ),
+        ),
+        wrapWithModel(
+          model: _model.settingsRowModel2,
+          updateCallback: () => safeSetState(() {}),
+          child: SettingsRowWidget(
+            label: 'My Birthday',
+            isLast: true,
+            value: 'Oct 12, 1992',
+          ),
+        ),
+        Container(
+          height: 16,
+        ),
+        wrapWithModel(
+          model: _model.buttonModel,
+          updateCallback: () => safeSetState(() {}),
+          child: ButtonWidget(
+            icon: Icon(
+              Icons.logout_rounded,
+              color: FlutterFlowTheme.of(context).primaryText,
+              size: 24,
+            ),
+            iconPresent: true,
+            iconEndPresent: false,
+            content: 'Sign Out',
+            variant: 'destructive',
+            size: 'medium',
+            fullWidth: true,
+            loading: false,
+            disabled: false,
+          ),
+        ),
+      ],
+    );
+  }
+}

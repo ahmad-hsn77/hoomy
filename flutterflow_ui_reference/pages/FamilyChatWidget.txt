@@ -1,0 +1,527 @@
+import '/flutter_flow/flutter_flow_icon_button.dart';
+import '/flutter_flow/flutter_flow_theme.dart';
+import '/flutter_flow/flutter_flow_util.dart';
+import '/flutter_flow/flutter_flow_widgets.dart';
+import '/pages/bottom_nav/bottom_nav_widget.dart';
+import '/pages/bottom_nav_child/bottom_nav_child_widget.dart';
+import '/pages/chat_bubble/chat_bubble_widget.dart';
+import '/pages/member_avatar/member_avatar_widget.dart';
+import '/pages/text_field/text_field_widget.dart';
+import 'dart:ui';
+import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
+
+import 'family_chat_model.dart';
+export 'family_chat_model.dart';
+
+class FamilyChatWidget extends StatefulWidget {
+  const FamilyChatWidget({super.key});
+
+  static String routeName = 'FamilyChat';
+  static String routePath = '/familyChat';
+
+  @override
+  State<FamilyChatWidget> createState() => _FamilyChatWidgetState();
+}
+
+class _FamilyChatWidgetState extends State<FamilyChatWidget> {
+  late FamilyChatModel _model;
+
+  final scaffoldKey = GlobalKey<ScaffoldState>();
+
+  @override
+  void initState() {
+    super.initState();
+    _model = createModel(context, () => FamilyChatModel());
+  }
+
+  @override
+  void dispose() {
+    _model.dispose();
+
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () {
+        FocusScope.of(context).unfocus();
+        FocusManager.instance.primaryFocus?.unfocus();
+      },
+      child: Scaffold(
+        key: scaffoldKey,
+        backgroundColor: FlutterFlowTheme.of(context).primaryBackground,
+        body: Column(
+          mainAxisSize: MainAxisSize.max,
+          mainAxisAlignment: MainAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Container(
+              decoration: BoxDecoration(
+                color: FlutterFlowTheme.of(context).secondaryBackground,
+                shape: BoxShape.rectangle,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Padding(
+                    padding: EdgeInsetsDirectional.fromSTEB(24, 16, 24, 16),
+                    child: Container(
+                      child: Row(
+                        mainAxisSize: MainAxisSize.max,
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          Row(
+                            mainAxisSize: MainAxisSize.max,
+                            mainAxisAlignment: MainAxisAlignment.start,
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            children: [
+                              FlutterFlowIconButton(
+                                borderRadius: 8,
+                                buttonSize: 40,
+                                fillColor: Colors.transparent,
+                                icon: Icon(
+                                  Icons.arrow_back_ios_new_rounded,
+                                  color:
+                                      FlutterFlowTheme.of(context).primaryText,
+                                  size: 20,
+                                ),
+                                onPressed: () {
+                                  print('IconButton pressed ...');
+                                },
+                              ),
+                              Column(
+                                mainAxisSize: MainAxisSize.min,
+                                mainAxisAlignment: MainAxisAlignment.start,
+                                crossAxisAlignment: CrossAxisAlignment.center,
+                                children: [
+                                  Text(
+                                    'Family Chat',
+                                    style: FlutterFlowTheme.of(context)
+                                        .titleMedium
+                                        .override(
+                                          font: GoogleFonts.plusJakartaSans(
+                                            fontWeight: FontWeight.bold,
+                                            fontStyle:
+                                                FlutterFlowTheme.of(context)
+                                                    .titleMedium
+                                                    .fontStyle,
+                                          ),
+                                          letterSpacing: 0.0,
+                                          fontWeight: FontWeight.bold,
+                                          fontStyle:
+                                              FlutterFlowTheme.of(context)
+                                                  .titleMedium
+                                                  .fontStyle,
+                                          lineHeight: 1.4,
+                                        ),
+                                  ),
+                                  Row(
+                                    mainAxisSize: MainAxisSize.max,
+                                    mainAxisAlignment: MainAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.center,
+                                    children: [
+                                      Container(
+                                        width: 8,
+                                        height: 8,
+                                        decoration: BoxDecoration(
+                                          color: FlutterFlowTheme.of(context)
+                                              .success,
+                                          borderRadius:
+                                              BorderRadius.circular(9999),
+                                          shape: BoxShape.rectangle,
+                                        ),
+                                      ),
+                                      Text(
+                                        '5 members active',
+                                        style: FlutterFlowTheme.of(context)
+                                            .labelSmall
+                                            .override(
+                                              font: GoogleFonts.outfit(
+                                                fontWeight:
+                                                    FlutterFlowTheme.of(context)
+                                                        .labelSmall
+                                                        .fontWeight,
+                                                fontStyle:
+                                                    FlutterFlowTheme.of(context)
+                                                        .labelSmall
+                                                        .fontStyle,
+                                              ),
+                                              color:
+                                                  FlutterFlowTheme.of(context)
+                                                      .secondaryText,
+                                              letterSpacing: 0.0,
+                                              fontWeight:
+                                                  FlutterFlowTheme.of(context)
+                                                      .labelSmall
+                                                      .fontWeight,
+                                              fontStyle:
+                                                  FlutterFlowTheme.of(context)
+                                                      .labelSmall
+                                                      .fontStyle,
+                                              lineHeight: 1.2,
+                                            ),
+                                      ),
+                                    ].divide(SizedBox(width: 4)),
+                                  ),
+                                ].divide(SizedBox(height: 4)),
+                              ),
+                            ].divide(SizedBox(width: 16)),
+                          ),
+                          Row(
+                            mainAxisSize: MainAxisSize.max,
+                            mainAxisAlignment: MainAxisAlignment.start,
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            children: [
+                              FlutterFlowIconButton(
+                                borderRadius: 8,
+                                buttonSize: 40,
+                                fillColor: Colors.transparent,
+                                icon: Icon(
+                                  Icons.phone_forwarded_rounded,
+                                  color: FlutterFlowTheme.of(context).primary,
+                                  size: 22,
+                                ),
+                                onPressed: () {
+                                  print('IconButton pressed ...');
+                                },
+                              ),
+                              FlutterFlowIconButton(
+                                borderRadius: 8,
+                                buttonSize: 40,
+                                fillColor: Colors.transparent,
+                                icon: Icon(
+                                  Icons.info_outline_rounded,
+                                  color: FlutterFlowTheme.of(context)
+                                      .secondaryText,
+                                  size: 22,
+                                ),
+                                onPressed: () {
+                                  print('IconButton pressed ...');
+                                },
+                              ),
+                            ].divide(SizedBox(width: 8)),
+                          ),
+                        ].divide(SizedBox(width: 16)),
+                      ),
+                    ),
+                  ),
+                  Container(
+                    height: 1,
+                    decoration: BoxDecoration(
+                      color: FlutterFlowTheme.of(context).alternate,
+                      shape: BoxShape.rectangle,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              flex: 1,
+              child: Container(
+                child: SingleChildScrollView(
+                  primary: false,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    mainAxisAlignment: MainAxisAlignment.start,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Padding(
+                        padding: EdgeInsets.all(24),
+                        child: Container(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            mainAxisAlignment: MainAxisAlignment.start,
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Padding(
+                                padding:
+                                    EdgeInsetsDirectional.fromSTEB(0, 0, 0, 16),
+                                child: Container(
+                                  child: Container(
+                                    alignment: AlignmentDirectional(0, 0),
+                                    child: Text(
+                                      'Today',
+                                      style: FlutterFlowTheme.of(context)
+                                          .labelSmall
+                                          .override(
+                                            font: GoogleFonts.outfit(
+                                              fontWeight:
+                                                  FlutterFlowTheme.of(context)
+                                                      .labelSmall
+                                                      .fontWeight,
+                                              fontStyle:
+                                                  FlutterFlowTheme.of(context)
+                                                      .labelSmall
+                                                      .fontStyle,
+                                            ),
+                                            color: FlutterFlowTheme.of(context)
+                                                .onBackground,
+                                            letterSpacing: 0.0,
+                                            fontWeight:
+                                                FlutterFlowTheme.of(context)
+                                                    .labelSmall
+                                                    .fontWeight,
+                                            fontStyle:
+                                                FlutterFlowTheme.of(context)
+                                                    .labelSmall
+                                                    .fontStyle,
+                                            lineHeight: 1.2,
+                                          ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              wrapWithModel(
+                                model: _model.chatBubbleModel1,
+                                updateCallback: () => safeSetState(() {}),
+                                child: ChatBubbleWidget(
+                                  isSystem: false,
+                                  pending: 'Pending',
+                                  pendingPresent: true,
+                                  text: 'Did anyone pick up the eggs?',
+                                  time: '09:15 AM',
+                                  isMe: false,
+                                ),
+                              ),
+                              wrapWithModel(
+                                model: _model.chatBubbleModel2,
+                                updateCallback: () => safeSetState(() {}),
+                                child: ChatBubbleWidget(
+                                  isSystem: false,
+                                  pending: 'Pending',
+                                  pendingPresent: true,
+                                  text:
+                                      'I\'m at the store now, checking the list!',
+                                  time: '09:18 AM',
+                                  isMe: true,
+                                ),
+                              ),
+                              wrapWithModel(
+                                model: _model.chatBubbleModel3,
+                                updateCallback: () => safeSetState(() {}),
+                                child: ChatBubbleWidget(
+                                  isSystem: true,
+                                  pending: 'Pending',
+                                  pendingPresent: true,
+                                  text: '✅ Mom bought 2 Cartons of Whole Milk',
+                                  time: '09:15 AM',
+                                  isMe: false,
+                                ),
+                              ),
+                              wrapWithModel(
+                                model: _model.chatBubbleModel4,
+                                updateCallback: () => safeSetState(() {}),
+                                child: ChatBubbleWidget(
+                                  isSystem: false,
+                                  pending: 'Pending',
+                                  pendingPresent: true,
+                                  text:
+                                      'Great! Don\'t forget we need dish soap too. It\'s marked as urgent.',
+                                  time: '09:20 AM',
+                                  isMe: false,
+                                ),
+                              ),
+                              wrapWithModel(
+                                model: _model.chatBubbleModel5,
+                                updateCallback: () => safeSetState(() {}),
+                                child: ChatBubbleWidget(
+                                  isSystem: true,
+                                  pending: 'Pending',
+                                  pendingPresent: true,
+                                  text: '🚨 Dad added Urgent Need: Dish Soap',
+                                  time: '09:15 AM',
+                                  isMe: false,
+                                ),
+                              ),
+                              wrapWithModel(
+                                model: _model.chatBubbleModel6,
+                                updateCallback: () => safeSetState(() {}),
+                                child: ChatBubbleWidget(
+                                  isSystem: false,
+                                  pending: 'Pending',
+                                  pendingPresent: true,
+                                  text: 'Got it. Heading to the checkout now.',
+                                  time: '09:45 AM',
+                                  isMe: true,
+                                ),
+                              ),
+                              wrapWithModel(
+                                model: _model.chatBubbleModel7,
+                                updateCallback: () => safeSetState(() {}),
+                                child: ChatBubbleWidget(
+                                  isSystem: false,
+                                  pending: 'true',
+                                  pendingPresent: true,
+                                  text: 'See you all at dinner! 🥗',
+                                  time: 'Just now',
+                                  isMe: true,
+                                ),
+                              ),
+                            ].divide(SizedBox(height: 16)),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            Container(
+              decoration: BoxDecoration(
+                color: FlutterFlowTheme.of(context).secondaryBackground,
+                shape: BoxShape.rectangle,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Container(
+                    height: 1,
+                    decoration: BoxDecoration(
+                      color: FlutterFlowTheme.of(context).alternate,
+                      shape: BoxShape.rectangle,
+                    ),
+                  ),
+                  Padding(
+                    padding: EdgeInsetsDirectional.fromSTEB(24, 16, 24, 16),
+                    child: Container(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        mainAxisAlignment: MainAxisAlignment.start,
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              mainAxisAlignment: MainAxisAlignment.start,
+                              crossAxisAlignment: CrossAxisAlignment.center,
+                              children: [
+                                wrapWithModel(
+                                  model: _model.memberAvatarModel1,
+                                  updateCallback: () => safeSetState(() {}),
+                                  child: MemberAvatarWidget(
+                                    name: 'Dad',
+                                    tone: FlutterFlowTheme.of(context).info,
+                                  ),
+                                ),
+                                wrapWithModel(
+                                  model: _model.memberAvatarModel2,
+                                  updateCallback: () => safeSetState(() {}),
+                                  child: MemberAvatarWidget(
+                                    name: 'Mom',
+                                    tone:
+                                        FlutterFlowTheme.of(context).secondary,
+                                  ),
+                                ),
+                                wrapWithModel(
+                                  model: _model.memberAvatarModel3,
+                                  updateCallback: () => safeSetState(() {}),
+                                  child: MemberAvatarWidget(
+                                    name: 'Leo',
+                                    tone: FlutterFlowTheme.of(context).tertiary,
+                                  ),
+                                ),
+                                wrapWithModel(
+                                  model: _model.memberAvatarModel4,
+                                  updateCallback: () => safeSetState(() {}),
+                                  child: MemberAvatarWidget(
+                                    name: 'Anna',
+                                    tone: FlutterFlowTheme.of(context).success,
+                                  ),
+                                ),
+                              ].divide(SizedBox(width: 8)),
+                            ),
+                          ),
+                          Row(
+                            mainAxisSize: MainAxisSize.max,
+                            mainAxisAlignment: MainAxisAlignment.start,
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            children: [
+                              FlutterFlowIconButton(
+                                borderRadius: 8,
+                                buttonSize: 44,
+                                fillColor: Colors.transparent,
+                                icon: Icon(
+                                  Icons.add_circle_outline_rounded,
+                                  color: FlutterFlowTheme.of(context).primary,
+                                  size: 28,
+                                ),
+                                onPressed: () {
+                                  print('IconButton pressed ...');
+                                },
+                              ),
+                              Expanded(
+                                flex: 1,
+                                child: wrapWithModel(
+                                  model: _model.textFieldModel,
+                                  updateCallback: () => safeSetState(() {}),
+                                  child: TextFieldWidget(
+                                    label: false,
+                                    helper: false,
+                                    leadingIcon: false,
+                                    leadingIconPresent: false,
+                                    trailingIcon: false,
+                                    trailingIconPresent: false,
+                                    hint: 'Message family...',
+                                    value: '',
+                                    onChange: '',
+                                    onSubmit: '',
+                                    variant: 'ghost',
+                                    error: false,
+                                  ),
+                                ),
+                              ),
+                              Container(
+                                width: 48,
+                                height: 48,
+                                decoration: BoxDecoration(
+                                  color: FlutterFlowTheme.of(context).primary,
+                                  borderRadius: BorderRadius.circular(9999),
+                                  shape: BoxShape.rectangle,
+                                ),
+                                alignment: AlignmentDirectional(0, 0),
+                                child: Icon(
+                                  Icons.send_rounded,
+                                  color: FlutterFlowTheme.of(context).onSurface,
+                                  size: 22,
+                                ),
+                              ),
+                            ].divide(SizedBox(width: 16)),
+                          ),
+                        ].divide(SizedBox(height: 16)),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Align(
+              alignment: AlignmentDirectional(0, 1),
+              child: Container(
+                child: Padding(
+                  padding: EdgeInsetsDirectional.fromSTEB(16, 0, 16, 16),
+                  child: Container(
+                    child: wrapWithModel(
+                      model: _model.bottomNavModel,
+                      updateCallback: () => safeSetState(() {}),
+                      child: BottomNavWidget(
+                        child: () => BottomNavChildWidget(),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

@@ -1,0 +1,621 @@
+import '/flutter_flow/flutter_flow_icon_button.dart';
+import '/flutter_flow/flutter_flow_theme.dart';
+import '/flutter_flow/flutter_flow_util.dart';
+import '/flutter_flow/flutter_flow_widgets.dart';
+import '/pages/button/button_widget.dart';
+import '/pages/member_selector_chip/member_selector_chip_widget.dart';
+import '/pages/switch_component/switch_component_widget.dart';
+import '/pages/text_field/text_field_widget.dart';
+import 'dart:ui';
+import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
+
+import 'need_alert_editor_model.dart';
+export 'need_alert_editor_model.dart';
+
+class NeedAlertEditorWidget extends StatefulWidget {
+  const NeedAlertEditorWidget({super.key});
+
+  static String routeName = 'NeedAlertEditor';
+  static String routePath = '/needAlertEditor';
+
+  @override
+  State<NeedAlertEditorWidget> createState() => _NeedAlertEditorWidgetState();
+}
+
+class _NeedAlertEditorWidgetState extends State<NeedAlertEditorWidget> {
+  late NeedAlertEditorModel _model;
+
+  final scaffoldKey = GlobalKey<ScaffoldState>();
+
+  @override
+  void initState() {
+    super.initState();
+    _model = createModel(context, () => NeedAlertEditorModel());
+  }
+
+  @override
+  void dispose() {
+    _model.dispose();
+
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () {
+        FocusScope.of(context).unfocus();
+        FocusManager.instance.primaryFocus?.unfocus();
+      },
+      child: Scaffold(
+        key: scaffoldKey,
+        backgroundColor: FlutterFlowTheme.of(context).primaryBackground,
+        body: Column(
+          mainAxisSize: MainAxisSize.max,
+          mainAxisAlignment: MainAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Container(
+              decoration: BoxDecoration(
+                color: FlutterFlowTheme.of(context).secondaryBackground,
+                shape: BoxShape.rectangle,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Padding(
+                    padding: EdgeInsetsDirectional.fromSTEB(24, 16, 24, 16),
+                    child: Container(
+                      child: Row(
+                        mainAxisSize: MainAxisSize.max,
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          FlutterFlowIconButton(
+                            borderRadius: 8,
+                            buttonSize: 40,
+                            fillColor: Colors.transparent,
+                            icon: Icon(
+                              Icons.close_rounded,
+                              color: FlutterFlowTheme.of(context).secondaryText,
+                              size: 24,
+                            ),
+                            onPressed: () {
+                              print('IconButton pressed ...');
+                            },
+                          ),
+                          Text(
+                            'Add House Need',
+                            style: FlutterFlowTheme.of(context)
+                                .titleMedium
+                                .override(
+                                  font: GoogleFonts.plusJakartaSans(
+                                    fontWeight: FontWeight.bold,
+                                    fontStyle: FlutterFlowTheme.of(context)
+                                        .titleMedium
+                                        .fontStyle,
+                                  ),
+                                  letterSpacing: 0.0,
+                                  fontWeight: FontWeight.bold,
+                                  fontStyle: FlutterFlowTheme.of(context)
+                                      .titleMedium
+                                      .fontStyle,
+                                  lineHeight: 1.4,
+                                ),
+                          ),
+                          wrapWithModel(
+                            model: _model.buttonModel1,
+                            updateCallback: () => safeSetState(() {}),
+                            child: ButtonWidget(
+                              iconPresent: false,
+                              iconEndPresent: false,
+                              content: 'Save',
+                              variant: 'ghost',
+                              size: 'small',
+                              fullWidth: false,
+                              loading: false,
+                              disabled: false,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  Container(
+                    height: 1,
+                    decoration: BoxDecoration(
+                      color: FlutterFlowTheme.of(context).alternate,
+                      shape: BoxShape.rectangle,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              flex: 1,
+              child: SingleChildScrollView(
+                primary: false,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Padding(
+                      padding: EdgeInsets.all(24),
+                      child: Container(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          mainAxisAlignment: MainAxisAlignment.start,
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            Container(
+                              child: Padding(
+                                padding:
+                                    EdgeInsetsDirectional.fromSTEB(0, 0, 0, 24),
+                                child: Container(
+                                  child: Container(
+                                    alignment: AlignmentDirectional(0, 0),
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.center,
+                                      children: [
+                                        Container(
+                                          width: 64,
+                                          height: 64,
+                                          decoration: BoxDecoration(
+                                            color: FlutterFlowTheme.of(context)
+                                                .secondaryBackground,
+                                            borderRadius:
+                                                BorderRadius.circular(9999),
+                                            shape: BoxShape.rectangle,
+                                          ),
+                                          alignment: AlignmentDirectional(0, 0),
+                                          child: Icon(
+                                            Icons.shopping_basket_rounded,
+                                            color: FlutterFlowTheme.of(context)
+                                                .primary,
+                                            size: 32,
+                                          ),
+                                        ),
+                                        Text(
+                                          'What is the family missing?',
+                                          style: FlutterFlowTheme.of(context)
+                                              .titleSmall
+                                              .override(
+                                                font:
+                                                    GoogleFonts.plusJakartaSans(
+                                                  fontWeight:
+                                                      FlutterFlowTheme.of(
+                                                              context)
+                                                          .titleSmall
+                                                          .fontWeight,
+                                                  fontStyle:
+                                                      FlutterFlowTheme.of(
+                                                              context)
+                                                          .titleSmall
+                                                          .fontStyle,
+                                                ),
+                                                color:
+                                                    FlutterFlowTheme.of(context)
+                                                        .secondaryText,
+                                                letterSpacing: 0.0,
+                                                fontWeight:
+                                                    FlutterFlowTheme.of(context)
+                                                        .titleSmall
+                                                        .fontWeight,
+                                                fontStyle:
+                                                    FlutterFlowTheme.of(context)
+                                                        .titleSmall
+                                                        .fontStyle,
+                                                lineHeight: 1.4,
+                                              ),
+                                        ),
+                                      ].divide(SizedBox(height: 8)),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                            Column(
+                              mainAxisSize: MainAxisSize.min,
+                              mainAxisAlignment: MainAxisAlignment.start,
+                              crossAxisAlignment: CrossAxisAlignment.center,
+                              children: [
+                                wrapWithModel(
+                                  model: _model.textFieldModel1,
+                                  updateCallback: () => safeSetState(() {}),
+                                  child: TextFieldWidget(
+                                    label: false,
+                                    helper: false,
+                                    leadingIcon: false,
+                                    leadingIconPresent: true,
+                                    trailingIcon: false,
+                                    trailingIconPresent: false,
+                                    hint: 'e.g. Whole Milk, Batteries',
+                                    value: '',
+                                    onChange: '',
+                                    onSubmit: '',
+                                    variant: 'outlined',
+                                    error: false,
+                                  ),
+                                ),
+                                Row(
+                                  mainAxisSize: MainAxisSize.max,
+                                  mainAxisAlignment: MainAxisAlignment.start,
+                                  crossAxisAlignment: CrossAxisAlignment.center,
+                                  children: [
+                                    Expanded(
+                                      flex: 1,
+                                      child: wrapWithModel(
+                                        model: _model.textFieldModel2,
+                                        updateCallback: () =>
+                                            safeSetState(() {}),
+                                        child: TextFieldWidget(
+                                          label: false,
+                                          helper: false,
+                                          leadingIcon: false,
+                                          leadingIconPresent: false,
+                                          trailingIcon: false,
+                                          trailingIconPresent: false,
+                                          hint: 'e.g. 2 packs',
+                                          value: '',
+                                          onChange: '',
+                                          onSubmit: '',
+                                          variant: 'outlined',
+                                          error: false,
+                                        ),
+                                      ),
+                                    ),
+                                    Expanded(
+                                      flex: 2,
+                                      child: wrapWithModel(
+                                        model: _model.textFieldModel3,
+                                        updateCallback: () =>
+                                            safeSetState(() {}),
+                                        child: TextFieldWidget(
+                                          label: false,
+                                          helper: false,
+                                          leadingIcon: false,
+                                          leadingIconPresent: false,
+                                          trailingIcon: false,
+                                          trailingIconPresent: false,
+                                          hint: 'e.g. Organic only',
+                                          value: '',
+                                          onChange: '',
+                                          onSubmit: '',
+                                          variant: 'outlined',
+                                          error: false,
+                                        ),
+                                      ),
+                                    ),
+                                  ].divide(SizedBox(width: 16)),
+                                ),
+                                Container(
+                                  decoration: BoxDecoration(
+                                    color: FlutterFlowTheme.of(context)
+                                        .secondaryBackground,
+                                    borderRadius: BorderRadius.circular(16),
+                                    shape: BoxShape.rectangle,
+                                    border: Border.all(
+                                      color: FlutterFlowTheme.of(context)
+                                          .alternate,
+                                      width: 1,
+                                    ),
+                                  ),
+                                  child: Padding(
+                                    padding: EdgeInsets.all(16),
+                                    child: Container(
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.max,
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.spaceBetween,
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.center,
+                                        children: [
+                                          Row(
+                                            mainAxisSize: MainAxisSize.max,
+                                            mainAxisAlignment:
+                                                MainAxisAlignment.start,
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.center,
+                                            children: [
+                                              Icon(
+                                                Icons.priority_high_rounded,
+                                                color:
+                                                    FlutterFlowTheme.of(context)
+                                                        .onSurface,
+                                                size: 24,
+                                              ),
+                                              Column(
+                                                mainAxisSize: MainAxisSize.min,
+                                                mainAxisAlignment:
+                                                    MainAxisAlignment.start,
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.center,
+                                                children: [
+                                                  Text(
+                                                    'Mark as Urgent',
+                                                    style: FlutterFlowTheme.of(
+                                                            context)
+                                                        .bodyMedium
+                                                        .override(
+                                                          font: GoogleFonts
+                                                              .outfit(
+                                                            fontWeight:
+                                                                FontWeight.w600,
+                                                            fontStyle:
+                                                                FlutterFlowTheme.of(
+                                                                        context)
+                                                                    .bodyMedium
+                                                                    .fontStyle,
+                                                          ),
+                                                          letterSpacing: 0.0,
+                                                          fontWeight:
+                                                              FontWeight.w600,
+                                                          fontStyle:
+                                                              FlutterFlowTheme.of(
+                                                                      context)
+                                                                  .bodyMedium
+                                                                  .fontStyle,
+                                                          lineHeight: 1.5,
+                                                        ),
+                                                  ),
+                                                  Text(
+                                                    'Notify family immediately',
+                                                    style: FlutterFlowTheme.of(
+                                                            context)
+                                                        .labelSmall
+                                                        .override(
+                                                          font: GoogleFonts
+                                                              .outfit(
+                                                            fontWeight:
+                                                                FlutterFlowTheme.of(
+                                                                        context)
+                                                                    .labelSmall
+                                                                    .fontWeight,
+                                                            fontStyle:
+                                                                FlutterFlowTheme.of(
+                                                                        context)
+                                                                    .labelSmall
+                                                                    .fontStyle,
+                                                          ),
+                                                          color: FlutterFlowTheme
+                                                                  .of(context)
+                                                              .secondaryText,
+                                                          letterSpacing: 0.0,
+                                                          fontWeight:
+                                                              FlutterFlowTheme.of(
+                                                                      context)
+                                                                  .labelSmall
+                                                                  .fontWeight,
+                                                          fontStyle:
+                                                              FlutterFlowTheme.of(
+                                                                      context)
+                                                                  .labelSmall
+                                                                  .fontStyle,
+                                                          lineHeight: 1.2,
+                                                        ),
+                                                  ),
+                                                ].divide(SizedBox(height: 0)),
+                                              ),
+                                            ].divide(SizedBox(width: 8)),
+                                          ),
+                                          wrapWithModel(
+                                            model: _model.switchModel,
+                                            updateCallback: () =>
+                                                safeSetState(() {}),
+                                            child: SwitchComponentWidget(
+                                              label: '',
+                                              labelPresent: false,
+                                              variant: 'Android',
+                                              active: false,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  mainAxisAlignment: MainAxisAlignment.start,
+                                  crossAxisAlignment: CrossAxisAlignment.center,
+                                  children: [
+                                    Row(
+                                      mainAxisSize: MainAxisSize.max,
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.spaceBetween,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.center,
+                                      children: [
+                                        Text(
+                                          'Assign to Members',
+                                          style: FlutterFlowTheme.of(context)
+                                              .titleSmall
+                                              .override(
+                                                font:
+                                                    GoogleFonts.plusJakartaSans(
+                                                  fontWeight:
+                                                      FlutterFlowTheme.of(
+                                                              context)
+                                                          .titleSmall
+                                                          .fontWeight,
+                                                  fontStyle:
+                                                      FlutterFlowTheme.of(
+                                                              context)
+                                                          .titleSmall
+                                                          .fontStyle,
+                                                ),
+                                                letterSpacing: 0.0,
+                                                fontWeight:
+                                                    FlutterFlowTheme.of(context)
+                                                        .titleSmall
+                                                        .fontWeight,
+                                                fontStyle:
+                                                    FlutterFlowTheme.of(context)
+                                                        .titleSmall
+                                                        .fontStyle,
+                                                lineHeight: 1.4,
+                                              ),
+                                        ),
+                                        Text(
+                                          'Leave empty for all',
+                                          style: FlutterFlowTheme.of(context)
+                                              .labelSmall
+                                              .override(
+                                                font: GoogleFonts.outfit(
+                                                  fontWeight:
+                                                      FlutterFlowTheme.of(
+                                                              context)
+                                                          .labelSmall
+                                                          .fontWeight,
+                                                  fontStyle:
+                                                      FlutterFlowTheme.of(
+                                                              context)
+                                                          .labelSmall
+                                                          .fontStyle,
+                                                ),
+                                                color:
+                                                    FlutterFlowTheme.of(context)
+                                                        .secondaryText,
+                                                letterSpacing: 0.0,
+                                                fontWeight:
+                                                    FlutterFlowTheme.of(context)
+                                                        .labelSmall
+                                                        .fontWeight,
+                                                fontStyle:
+                                                    FlutterFlowTheme.of(context)
+                                                        .labelSmall
+                                                        .fontStyle,
+                                                lineHeight: 1.2,
+                                              ),
+                                        ),
+                                      ],
+                                    ),
+                                    Wrap(
+                                      spacing: 8,
+                                      runSpacing: 8,
+                                      alignment: WrapAlignment.start,
+                                      crossAxisAlignment:
+                                          WrapCrossAlignment.start,
+                                      direction: Axis.horizontal,
+                                      runAlignment: WrapAlignment.start,
+                                      verticalDirection: VerticalDirection.down,
+                                      clipBehavior: Clip.none,
+                                      children: [
+                                        wrapWithModel(
+                                          model:
+                                              _model.memberSelectorChipModel1,
+                                          updateCallback: () =>
+                                              safeSetState(() {}),
+                                          child: MemberSelectorChipWidget(
+                                            name: 'Dad',
+                                            selected: false,
+                                          ),
+                                        ),
+                                        wrapWithModel(
+                                          model:
+                                              _model.memberSelectorChipModel2,
+                                          updateCallback: () =>
+                                              safeSetState(() {}),
+                                          child: MemberSelectorChipWidget(
+                                            name: 'Mom',
+                                            selected: true,
+                                          ),
+                                        ),
+                                        wrapWithModel(
+                                          model:
+                                              _model.memberSelectorChipModel3,
+                                          updateCallback: () =>
+                                              safeSetState(() {}),
+                                          child: MemberSelectorChipWidget(
+                                            name: 'Leo',
+                                            selected: false,
+                                          ),
+                                        ),
+                                        wrapWithModel(
+                                          model:
+                                              _model.memberSelectorChipModel4,
+                                          updateCallback: () =>
+                                              safeSetState(() {}),
+                                          child: MemberSelectorChipWidget(
+                                            name: 'Anna',
+                                            selected: true,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ].divide(SizedBox(height: 16)),
+                                ),
+                              ].divide(SizedBox(height: 16)),
+                            ),
+                          ].divide(SizedBox(height: 24)),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            Container(
+              decoration: BoxDecoration(
+                color: FlutterFlowTheme.of(context).secondaryBackground,
+                shape: BoxShape.rectangle,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Container(
+                    height: 1,
+                    decoration: BoxDecoration(
+                      color: FlutterFlowTheme.of(context).alternate,
+                      shape: BoxShape.rectangle,
+                    ),
+                  ),
+                  Padding(
+                    padding: EdgeInsets.all(24),
+                    child: Container(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        mainAxisAlignment: MainAxisAlignment.start,
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          wrapWithModel(
+                            model: _model.buttonModel2,
+                            updateCallback: () => safeSetState(() {}),
+                            child: ButtonWidget(
+                              icon: Icon(
+                                Icons.add_rounded,
+                                color: FlutterFlowTheme.of(context).primaryText,
+                                size: 24,
+                              ),
+                              iconPresent: true,
+                              iconEndPresent: false,
+                              content: 'Add to List',
+                              variant: 'primary',
+                              size: 'large',
+                              fullWidth: true,
+                              loading: false,
+                              disabled: false,
+                            ),
+                          ),
+                        ].divide(SizedBox(height: 16)),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

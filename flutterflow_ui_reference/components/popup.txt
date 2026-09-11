@@ -1,0 +1,143 @@
+// Generated code for this Container Widget...
+Container(
+  decoration: BoxDecoration(
+    color: FlutterFlowTheme.of(context).secondaryBackground,
+    borderRadius: BorderRadius.circular(24),
+    shape: BoxShape.rectangle,
+    border: Border.all(
+      color: FlutterFlowTheme.of(context).alternate,
+      width: 1,
+    ),
+  ),
+  child: Padding(
+    padding: EdgeInsetsDirectional.fromSTEB(16, 8, 16, 8),
+    child: Container(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        mainAxisAlignment: MainAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: EdgeInsetsDirectional.fromSTEB(8, 4, 8, 4),
+            child: Row(
+              mainAxisSize: MainAxisSize.max,
+              mainAxisAlignment: MainAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: FlutterFlowTheme.of(context).error,
+                    borderRadius: BorderRadius.circular(9999),
+                    shape: BoxShape.rectangle,
+                  ),
+                ),
+                Text(
+                  'Message Options',
+                  style: FlutterFlowTheme.of(context).labelSmall.override(
+                        font: GoogleFonts.outfit(
+                          fontWeight: FlutterFlowTheme.of(context)
+                              .labelSmall
+                              .fontWeight,
+                          fontStyle: FlutterFlowTheme.of(context)
+                              .labelSmall
+                              .fontStyle,
+                        ),
+                        color: FlutterFlowTheme.of(context).secondaryText,
+                        letterSpacing: 0.0,
+                        fontWeight: FlutterFlowTheme.of(context)
+                            .labelSmall
+                            .fontWeight,
+                        fontStyle:
+                            FlutterFlowTheme.of(context).labelSmall.fontStyle,
+                        lineHeight: 1.2,
+                      ),
+                ),
+              ].divide(SizedBox(width: 8)),
+            ),
+          ),
+          Padding(
+            padding: EdgeInsetsDirectional.fromSTEB(0, 8, 0, 8),
+            child: Container(
+              child: Divider(
+                height: 16,
+                thickness: 1,
+                indent: 0,
+                endIndent: 0,
+                color: FlutterFlowTheme.of(context).alternate,
+              ),
+            ),
+          ),
+          wrapWithModel(
+            model: _model.chatActionItemModel1,
+            updateCallback: () => safeSetState(() {}),
+            child: ChatActionItemWidget(
+              icon: Icon(
+                Icons.reply_rounded,
+                color: FlutterFlowTheme.of(context).primary,
+                size: 22,
+              ),
+              iconBg: FlutterFlowTheme.of(context).primaryContainer,
+              iconColor: FlutterFlowTheme.of(context).primary,
+              subtitle: 'Let family know where you are',
+              title: 'Reply',
+              padding: 8.0,
+            ),
+          ),
+          wrapWithModel(
+            model: _model.chatActionItemModel2,
+            updateCallback: () => safeSetState(() {}),
+            child: ChatActionItemWidget(
+              icon: Icon(
+                Icons.edit_rounded,
+                color: FlutterFlowTheme.of(context).primary,
+                size: 22,
+              ),
+              iconBg: FlutterFlowTheme.of(context).primaryContainer,
+              iconColor: FlutterFlowTheme.of(context).primary,
+              subtitle: 'Let family know where you are',
+              title: 'Edit',
+              padding: 8.0,
+            ),
+          ),
+          wrapWithModel(
+            model: _model.chatActionItemModel3,
+            updateCallback: () => safeSetState(() {}),
+            child: ChatActionItemWidget(
+              icon: Icon(
+                Icons.delete_outline_rounded,
+                color: FlutterFlowTheme.of(context).error,
+                size: 22,
+              ),
+              iconBg: FlutterFlowTheme.of(context).error10,
+              iconColor: FlutterFlowTheme.of(context).error,
+              subtitle: 'Let family know where you are',
+              title: 'Delete',
+              padding: 8.0,
+            ),
+          ),
+          wrapWithModel(
+            model: _model.chatActionItemModel4,
+            updateCallback: () => safeSetState(() {}),
+            child: ChatActionItemWidget(
+              icon: Icon(
+                Icons.info_outline_rounded,
+                color: FlutterFlowTheme.of(context).info,
+                size: 22,
+              ),
+              iconBg: FlutterFlowTheme.of(context).info10,
+              iconColor: FlutterFlowTheme.of(context).info,
+              subtitle: 'Let family know where you are',
+              title: 'Info',
+              padding: 8.0,
+            ),
+          ),
+          Container(
+            height: 8,
+          ),
+        ],
+      ),
+    ),
+  ),
+)

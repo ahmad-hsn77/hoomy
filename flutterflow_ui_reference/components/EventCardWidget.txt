@@ -1,0 +1,222 @@
+import '/flutter_flow/flutter_flow_icon_button.dart';
+import '/flutter_flow/flutter_flow_theme.dart';
+import '/flutter_flow/flutter_flow_util.dart';
+import '/flutter_flow/flutter_flow_widgets.dart';
+import 'dart:ui';
+import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
+
+import 'event_card_model.dart';
+export 'event_card_model.dart';
+
+class EventCardWidget extends StatefulWidget {
+  const EventCardWidget({
+    super.key,
+    Color? iconBg,
+    this.iconName,
+    bool? isBirthday,
+    String? time,
+    String? title,
+    String? type,
+  })  : this.iconBg = iconBg ?? const Color(0x00000000),
+        this.isBirthday = isBirthday ?? true,
+        this.time = time ?? 'All Day',
+        this.title = title ?? 'Leo\'s 10th Birthday',
+        this.type = type ?? 'Birthday';
+
+  final Color iconBg;
+  final Widget? iconName;
+  final bool isBirthday;
+  final String time;
+  final String title;
+  final String type;
+
+  @override
+  State<EventCardWidget> createState() => _EventCardWidgetState();
+}
+
+class _EventCardWidgetState extends State<EventCardWidget> {
+  late EventCardModel _model;
+
+  @override
+  void setState(VoidCallback callback) {
+    super.setState(callback);
+    _model.onUpdate();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _model = createModel(context, () => EventCardModel());
+  }
+
+  @override
+  void dispose() {
+    _model.maybeDispose();
+
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: FlutterFlowTheme.of(context).secondaryBackground,
+        borderRadius: BorderRadius.circular(16),
+        shape: BoxShape.rectangle,
+        border: Border.all(
+          color: FlutterFlowTheme.of(context).alternate,
+          width: 1,
+        ),
+      ),
+      child: Padding(
+        padding: EdgeInsets.all(16),
+        child: Container(
+          child: Row(
+            mainAxisSize: MainAxisSize.max,
+            mainAxisAlignment: MainAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: valueOrDefault<Color>(
+                    widget!.iconBg,
+                    FlutterFlowTheme.of(context).tertiary,
+                  ),
+                  borderRadius: BorderRadius.circular(12),
+                  shape: BoxShape.rectangle,
+                ),
+                alignment: AlignmentDirectional(0, 0),
+                child: widget!.iconName!,
+              ),
+              Expanded(
+                flex: 1,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Row(
+                      mainAxisSize: MainAxisSize.max,
+                      mainAxisAlignment: MainAxisAlignment.start,
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        Text(
+                          valueOrDefault<String>(
+                            widget!.title,
+                            'Leo\'s 10th Birthday',
+                          ),
+                          maxLines: 1,
+                          style: FlutterFlowTheme.of(context)
+                              .titleSmall
+                              .override(
+                                font: GoogleFonts.plusJakartaSans(
+                                  fontWeight: FlutterFlowTheme.of(context)
+                                      .titleSmall
+                                      .fontWeight,
+                                  fontStyle: FlutterFlowTheme.of(context)
+                                      .titleSmall
+                                      .fontStyle,
+                                ),
+                                color: FlutterFlowTheme.of(context).primaryText,
+                                letterSpacing: 0.0,
+                                fontWeight: FlutterFlowTheme.of(context)
+                                    .titleSmall
+                                    .fontWeight,
+                                fontStyle: FlutterFlowTheme.of(context)
+                                    .titleSmall
+                                    .fontStyle,
+                                lineHeight: 1.4,
+                              ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        Container(
+                          decoration: BoxDecoration(
+                            color: FlutterFlowTheme.of(context).accent15,
+                            borderRadius: BorderRadius.circular(9999),
+                            shape: BoxShape.rectangle,
+                          ),
+                          child: Padding(
+                            padding: EdgeInsetsDirectional.fromSTEB(8, 2, 8, 2),
+                            child: Container(
+                              child: Text(
+                                'Birthday',
+                                style: FlutterFlowTheme.of(context)
+                                    .labelSmall
+                                    .override(
+                                      font: GoogleFonts.outfit(
+                                        fontWeight: FlutterFlowTheme.of(context)
+                                            .labelSmall
+                                            .fontWeight,
+                                        fontStyle: FlutterFlowTheme.of(context)
+                                            .labelSmall
+                                            .fontStyle,
+                                      ),
+                                      color:
+                                          FlutterFlowTheme.of(context).tertiary,
+                                      letterSpacing: 0.0,
+                                      fontWeight: FlutterFlowTheme.of(context)
+                                          .labelSmall
+                                          .fontWeight,
+                                      fontStyle: FlutterFlowTheme.of(context)
+                                          .labelSmall
+                                          .fontStyle,
+                                      lineHeight: 1.2,
+                                    ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ].divide(SizedBox(width: 8)),
+                    ),
+                    Text(
+                      valueOrDefault<String>(
+                        widget!.time,
+                        'All Day',
+                      ),
+                      style: FlutterFlowTheme.of(context).bodySmall.override(
+                            font: GoogleFonts.outfit(
+                              fontWeight: FlutterFlowTheme.of(context)
+                                  .bodySmall
+                                  .fontWeight,
+                              fontStyle: FlutterFlowTheme.of(context)
+                                  .bodySmall
+                                  .fontStyle,
+                            ),
+                            color: FlutterFlowTheme.of(context).secondaryText,
+                            letterSpacing: 0.0,
+                            fontWeight: FlutterFlowTheme.of(context)
+                                .bodySmall
+                                .fontWeight,
+                            fontStyle: FlutterFlowTheme.of(context)
+                                .bodySmall
+                                .fontStyle,
+                            lineHeight: 1.4,
+                          ),
+                    ),
+                  ].divide(SizedBox(height: 4)),
+                ),
+              ),
+              FlutterFlowIconButton(
+                borderRadius: 8,
+                buttonSize: 40,
+                fillColor: Colors.transparent,
+                icon: Icon(
+                  Icons.chevron_right_rounded,
+                  color: FlutterFlowTheme.of(context).accent3,
+                  size: 24,
+                ),
+                onPressed: () {
+                  print('IconButton pressed ...');
+                },
+              ),
+            ].divide(SizedBox(width: 16)),
+          ),
+        ),
+      ),
+    );
+  }
+}
