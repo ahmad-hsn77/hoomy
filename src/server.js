@@ -288,15 +288,48 @@ function houseState(house, userId) {
   return {
     house,
     houses: housesForUser(userId),
-    members: house.members.map((member) => ({
-      ...member,
-      user: publicUser(db.users.find((user) => user.id === member.userId) || {}),
-    })),
-    alerts: db.alerts.filter((item) => item.houseId === house.id),
-    reminders: db.reminders.filter((item) => item.houseId === house.id),
-    messages: db.messages.filter((item) => item.houseId === house.id),
-    shortcuts: db.shortcuts.filter((item) => item.houseId === house.id && (!userId || item.createdBy === userId)),
+    user: publicUser(db.users.find((user) => idOf(user.id) === idOf(userId)) || {}),
+    members: houseMembers(house),
+    alerts: houseAlerts(house),
+    reminders: houseReminders(house),
+    messages: houseMessages(house),
+    shortcuts: houseShortcuts(house, userId),
   };
+}
+
+function houseSummary(house, user) {
+  const membership = house.members.find((member) => idOf(member.userId) === idOf(user.id));
+  return {
+    house,
+    houses: housesForUser(user.id),
+    user: publicUser({
+      ...user,
+      relation: membership?.relation || membership?.role || user.relation || 'Member',
+    }),
+  };
+}
+
+function houseMembers(house) {
+  return house.members.map((member) => ({
+    ...member,
+    user: publicUser(db.users.find((user) => idOf(user.id) === idOf(member.userId)) || {}),
+  }));
+}
+
+function houseAlerts(house) {
+  return db.alerts.filter((item) => idOf(item.houseId) === idOf(house.id));
+}
+
+function houseReminders(house) {
+  return db.reminders.filter((item) => idOf(item.houseId) === idOf(house.id));
+}
+
+function houseMessages(house) {
+  return db.messages.filter((item) => idOf(item.houseId) === idOf(house.id));
+}
+
+function houseShortcuts(house, userId) {
+  return db.shortcuts.filter((item) => idOf(item.houseId) === idOf(house.id) && (!userId || idOf(item.createdBy) === idOf(userId)));
 }
 
 function firstHouseForUser(userId) {
@@ -1137,6 +1170,30 @@ app.post('/houses/join', requireAuth, (req, res) => {
 
 app.get('/houses/:houseId/state', requireAuth, requireHouseMember, (req, res) => {
   res.json(houseState(req.house, req.user.id));
+});
+
+app.get('/houses/:houseId/summary', requireAuth, requireHouseMember, (req, res) => {
+  res.json(houseSummary(req.house, req.user));
+});
+
+app.get('/houses/:houseId/sections/members', requireAuth, requireHouseMember, (req, res) => {
+  res.json({ members: houseMembers(req.house) });
+});
+
+app.get('/houses/:houseId/sections/alerts', requireAuth, requireHouseMember, (req, res) => {
+  res.json({ alerts: houseAlerts(req.house) });
+});
+
+app.get('/houses/:houseId/sections/reminders', requireAuth, requireHouseMember, (req, res) => {
+  res.json({ reminders: houseReminders(req.house) });
+});
+
+app.get('/houses/:houseId/sections/messages', requireAuth, requireHouseMember, (req, res) => {
+  res.json({ messages: houseMessages(req.house) });
+});
+
+app.get('/houses/:houseId/sections/shortcuts', requireAuth, requireHouseMember, (req, res) => {
+  res.json({ shortcuts: houseShortcuts(req.house, req.user.id) });
 });
 
 app.post('/houses/:houseId/members', requireAuth, requireHouseMember, (req, res) => {
