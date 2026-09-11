@@ -350,6 +350,23 @@ function parseMessageBefore(value) {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+function alertBoughtMessage(alert, buyer, bought = {}) {
+  const details = [
+    cleanDetail('Note', alert.note),
+    cleanDetail('Requested quantity', alert.quantity),
+    cleanDetail('Bought quantity', bought.quantity),
+    cleanDetail('Price', bought.price),
+  ].filter(Boolean);
+  const lines = [`${alert.title} has been done by ${buyer.name}.`];
+  if (details.length > 0) lines.push(...details);
+  return lines.join('\n');
+}
+
+function cleanDetail(label, value) {
+  const text = value?.toString().trim();
+  return text ? `${label}: ${text}` : null;
+}
+
 function houseShortcuts(house, userId) {
   return db.shortcuts.filter((item) => idOf(item.houseId) === idOf(house.id) && (!userId || idOf(item.createdBy) === idOf(userId)));
 }
@@ -1319,7 +1336,7 @@ app.post('/houses/:houseId/alerts/:alertId/bought', requireAuth, requireHouseMem
   createHouseMessage({
     houseId: req.house.id,
     senderId: req.user.id,
-    text: `${alert.title} has been done by ${req.user.name}${req.body.price ? ` for ${req.body.price}` : ''}.`,
+    text: alertBoughtMessage(alert, req.user, alert.bought),
     system: true,
   });
   res.json(alert);
