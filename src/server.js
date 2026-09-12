@@ -117,6 +117,14 @@ const db = {
   messages: [],
   shortcuts: [],
   passwordResetRequests: [],
+  adminAuditLogs: [],
+  appVersionPolicy: {
+    latestVersion: process.env.APP_LATEST_VERSION?.trim() || '0.1.4',
+    minimumSupportedVersion: process.env.APP_MIN_SUPPORTED_VERSION?.trim() || '',
+    updateUrl: process.env.APP_UPDATE_URL?.trim() || '',
+    releaseNotes: process.env.APP_UPDATE_NOTES?.trim() || '',
+    forceUpdate: process.env.APP_FORCE_UPDATE === 'true',
+  },
 };
 
 const dataStoreConfig = {
@@ -135,6 +143,13 @@ function loadDbState(state = {}) {
   for (const key of Object.keys(db)) {
     if (Array.isArray(state[key])) {
       db[key] = state[key];
+    } else if (
+      state[key] &&
+      typeof state[key] === 'object' &&
+      !Array.isArray(db[key]) &&
+      typeof db[key] === 'object'
+    ) {
+      Object.assign(db[key], state[key]);
     }
   }
 }
@@ -223,6 +238,11 @@ const notificationChannels = {
 };
 const allowedMessageReactions = ['❤️', '😂', '👍', '🙏', '😮', '😢'];
 
+const adminDashboardToken = process.env.ADMIN_DASHBOARD_TOKEN?.trim();
+const fallbackAdminDashboardToken =
+  process.env.NODE_ENV === 'production' ? null : 'dev-admin-token';
+const appVersionPolicy = db.appVersionPolicy;
+
 function normalize(value) {
   return value?.toString().trim().toLowerCase() || '';
 }
@@ -270,6 +290,26 @@ function requireAuth(req, res, next) {
   } catch {
     res.status(401).json({ message: 'Invalid token' });
   }
+}
+
+function requireAdmin(req, res, next) {
+  const header = req.headers.authorization || '';
+  const token = header.startsWith('Bearer ') ? header.slice(7) : null;
+  const expectedToken = adminDashboardToken || fallbackAdminDashboardToken;
+  if (!expectedToken) {
+    return res.status(503).json({
+      message: 'Admin dashboard token is not configured',
+    });
+  }
+  if (!token || token !== expectedToken) {
+    return res.status(401).json({ message: 'Invalid admin token' });
+  }
+  req.adminActor = {
+    id: 'dashboard',
+    name: 'Dashboard Admin',
+    role: 'super_admin',
+  };
+  next();
 }
 
 function requireHouseMember(req, res, next) {
@@ -369,6 +409,185 @@ function cleanDetail(label, value) {
 
 function houseShortcuts(house, userId) {
   return db.shortcuts.filter((item) => idOf(item.houseId) === idOf(house.id) && (!userId || idOf(item.createdBy) === idOf(userId)));
+}
+
+function adminListQuery(query) {
+  const limit = Math.min(Math.max(Number.parseInt(query.limit, 10) || 25, 1), 100);
+  const offset = Math.max(Number.parseInt(query.offset, 10) || 0, 0);
+  const search = normalize(query.search);
+  const status = normalize(query.status);
+  return { limit, offset, search, status };
+}
+
+function paginate(items, { limit, offset }) {
+  return {
+    items: items.slice(offset, offset + limit),
+    total: items.length,
+    limit,
+    offset,
+    nextOffset: offset + limit < items.length ? offset + limit : null,
+  };
+}
+
+function matchesSearch(values, search) {
+  if (!search) return true;
+  return values.some((value) => normalize(value).includes(search));
+}
+
+function dateMs(value) {
+  const parsed = new Date(value || 0).getTime();
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function houseForId(houseId) {
+  return db.houses.find((house) => idOf(house.id) === idOf(houseId));
+}
+
+function userForId(userId) {
+  return db.users.find((user) => idOf(user.id) === idOf(userId));
+}
+
+function adminUserSummary(user) {
+  const memberships = db.houses
+    .flatMap((house) =>
+      house.members
+        .filter((member) => idOf(member.userId) === idOf(user.id))
+        .map((member) => ({ house, member }))
+    );
+  return {
+    ...publicUser(user),
+    houseCount: memberships.length,
+    houses: memberships.map(({ house, member }) => ({
+      id: house.id,
+      name: house.name,
+      code: house.specialNumber,
+      role: member.relation || member.role || 'Member',
+      admin: member.admin === true,
+    })),
+    status: user.status || 'active',
+    lastActiveAt: user.lastActiveAt || user.updatedAt || user.createdAt || null,
+    lastAppVersion: user.lastAppVersion || null,
+    lastPlatform: user.lastPlatform || null,
+  };
+}
+
+function adminHouseSummary(house) {
+  const alerts = houseAlerts(house);
+  const reminders = houseReminders(house);
+  const messages = houseMessages(house, { limit: 5 });
+  return {
+    ...house,
+    membersCount: house.members.length,
+    openNeedsCount: alerts.filter((alert) => alert.status !== 'bought').length,
+    urgentNeedsCount: alerts.filter((alert) => alert.emergency === true).length,
+    remindersCount: reminders.length,
+    recentMessagesCount: messages.length,
+    status: house.status || 'active',
+  };
+}
+
+function adminAlertSummary(alert) {
+  const house = houseForId(alert.houseId);
+  const creator = userForId(alert.createdBy);
+  return {
+    ...alert,
+    houseName: house?.name || 'Unknown house',
+    requesterName: creator?.name || 'Unknown member',
+  };
+}
+
+function adminMessageSummary(message) {
+  const house = houseForId(message.houseId);
+  const sender = userForId(message.senderId);
+  const reported = message.reported === true || message.flagged === true;
+  return {
+    ...message,
+    houseName: house?.name || 'Unknown house',
+    senderName: sender?.name || 'System',
+    moderationStatus: message.moderationStatus || (reported ? 'reported' : 'normal'),
+    risk: reported ? 'Needs review' : message.system ? 'System' : 'Normal',
+  };
+}
+
+function adminReminderSummary(reminder) {
+  const house = houseForId(reminder.houseId);
+  const creator = userForId(reminder.createdBy);
+  return {
+    ...reminder,
+    houseName: house?.name || 'Unknown house',
+    creatorName: creator?.name || 'Unknown member',
+    deliveryStatus: reminder.deliveryStatus || 'scheduled',
+  };
+}
+
+function adminOverview() {
+  const openNeeds = db.alerts.filter((alert) => alert.status !== 'bought');
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const messagesToday = db.messages.filter((message) => dateMs(message.createdAt) >= todayStart.getTime());
+  return {
+    metrics: {
+      totalUsers: db.users.length,
+      activeHouses: db.houses.filter((house) => house.status !== 'archived').length,
+      openNeeds: openNeeds.length,
+      urgentNeeds: openNeeds.filter((alert) => alert.emergency === true).length,
+      reminders: db.reminders.length,
+      messagesToday: messagesToday.length,
+      shortcuts: db.shortcuts.length,
+    },
+    health: adminHealth(),
+    recentActivity: recentAdminActivity(),
+  };
+}
+
+function adminHealth() {
+  return {
+    api: 'healthy',
+    databaseConfigured: Boolean(dataStoreConfig.uri),
+    databaseReady: dataStoreReady,
+    firebaseAdminConfigured: Boolean(firebaseMessaging),
+    latestVersion: appVersionPolicy.latestVersion,
+    minimumSupportedVersion: appVersionPolicy.minimumSupportedVersion,
+  };
+}
+
+function recentAdminActivity() {
+  const systemEvents = [
+    ...db.alerts.map((alert) => ({
+      id: alert.id,
+      type: alert.status === 'bought' ? 'need.done' : 'need.created',
+      description: `${alert.title} in ${houseForId(alert.houseId)?.name || 'Unknown house'}`,
+      at: alert.bought?.at || alert.createdAt,
+      tone: alert.emergency ? 'danger' : 'info',
+    })),
+    ...db.messages.slice(-20).map((message) => ({
+      id: message.id,
+      type: message.system ? 'message.system' : 'message.created',
+      description: `${userForId(message.senderId)?.name || 'System'} in ${houseForId(message.houseId)?.name || 'Unknown house'}`,
+      at: message.createdAt,
+      tone: message.system ? 'warning' : 'success',
+    })),
+    ...db.adminAuditLogs,
+  ];
+  return systemEvents.sort((a, b) => dateMs(b.at) - dateMs(a.at)).slice(0, 20);
+}
+
+function recordAdminAction(req, action, target = {}) {
+  const entry = {
+    id: uuid(),
+    type: action,
+    description: target.description || action,
+    actorId: req.adminActor?.id || 'dashboard',
+    actorName: req.adminActor?.name || 'Dashboard Admin',
+    targetType: target.type || null,
+    targetId: target.id || null,
+    at: new Date().toISOString(),
+    tone: target.tone || 'info',
+  };
+  db.adminAuditLogs.unshift(entry);
+  db.adminAuditLogs = db.adminAuditLogs.slice(0, 500);
+  persistDb();
+  return entry;
 }
 
 function firstHouseForUser(userId) {
@@ -892,18 +1111,14 @@ app.get('/health', (_req, res) => {
 });
 
 app.get('/app/update', (req, res) => {
-  const latestVersion = process.env.APP_LATEST_VERSION?.trim() || '0.1.0';
-  const minimumSupportedVersion =
-    process.env.APP_MIN_SUPPORTED_VERSION?.trim() || '';
-  const updateUrl = process.env.APP_UPDATE_URL?.trim() || '';
-  const releaseNotes = process.env.APP_UPDATE_NOTES?.trim() || '';
   const currentVersion = req.query.currentVersion?.toString() || '';
 
   res.json({
-    latestVersion,
-    minimumSupportedVersion,
-    updateUrl,
-    releaseNotes,
+    latestVersion: appVersionPolicy.latestVersion,
+    minimumSupportedVersion: appVersionPolicy.minimumSupportedVersion,
+    updateUrl: appVersionPolicy.updateUrl,
+    releaseNotes: appVersionPolicy.releaseNotes,
+    forceUpdate: appVersionPolicy.forceUpdate,
     currentVersion,
   });
 });
@@ -915,6 +1130,212 @@ app.get('/', (_req, res) => {
     message: 'Hoomy backend is running',
     health: '/health',
   });
+});
+
+app.get('/admin/overview', requireAdmin, (_req, res) => {
+  res.json(adminOverview());
+});
+
+app.get('/admin/users', requireAdmin, (req, res) => {
+  const query = adminListQuery(req.query);
+  const status = query.status === 'all' ? '' : query.status;
+  const users = db.users
+    .map(adminUserSummary)
+    .filter((user) =>
+      matchesSearch([user.name, user.email, user.phone, user.relation, user.status], query.search)
+    )
+    .filter((user) => !status || normalize(user.status) === status)
+    .sort((a, b) => dateMs(b.lastActiveAt) - dateMs(a.lastActiveAt));
+  res.json(paginate(users, query));
+});
+
+app.get('/admin/users/:userId', requireAdmin, (req, res) => {
+  const user = userForId(req.params.userId);
+  if (!user) return res.status(404).json({ message: 'User not found' });
+  res.json(adminUserSummary(user));
+});
+
+app.patch('/admin/users/:userId/status', requireAdmin, (req, res) => {
+  const user = userForId(req.params.userId);
+  if (!user) return res.status(404).json({ message: 'User not found' });
+  const status = ['active', 'suspended', 'deleted'].includes(req.body.status)
+    ? req.body.status
+    : 'active';
+  user.status = status;
+  user.suspensionReason = req.body.reason?.toString() || null;
+  user.updatedAt = new Date().toISOString();
+  recordAdminAction(req, 'user.status.updated', {
+    type: 'user',
+    id: user.id,
+    description: `${user.name} set to ${status}`,
+    tone: status === 'suspended' ? 'warning' : 'success',
+  });
+  persistDb();
+  res.json(adminUserSummary(user));
+});
+
+app.get('/admin/houses', requireAdmin, (req, res) => {
+  const query = adminListQuery(req.query);
+  const status = query.status === 'all' ? '' : query.status;
+  const houses = db.houses
+    .map(adminHouseSummary)
+    .filter((house) =>
+      matchesSearch([house.name, house.specialNumber, house.address, house.status], query.search)
+    )
+    .filter((house) => !status || normalize(house.status) === status)
+    .sort((a, b) => dateMs(b.createdAt) - dateMs(a.createdAt));
+  res.json(paginate(houses, query));
+});
+
+app.get('/admin/houses/:houseId', requireAdmin, (req, res) => {
+  const house = houseForId(req.params.houseId);
+  if (!house) return res.status(404).json({ message: 'House not found' });
+  res.json({
+    ...adminHouseSummary(house),
+    members: houseMembers(house),
+    alerts: houseAlerts(house).map(adminAlertSummary),
+    reminders: houseReminders(house).map(adminReminderSummary),
+    messages: houseMessages(house, { limit: 30 }).map(adminMessageSummary),
+    shortcuts: houseShortcuts(house),
+  });
+});
+
+app.get('/admin/needs', requireAdmin, (req, res) => {
+  const query = adminListQuery(req.query);
+  const status = query.status === 'all' ? '' : query.status;
+  const needs = db.alerts
+    .map(adminAlertSummary)
+    .filter((alert) =>
+      matchesSearch([alert.title, alert.note, alert.quantity, alert.houseName, alert.requesterName], query.search)
+    )
+    .filter((alert) => !status || normalize(alert.status || 'open') === status || (status === 'urgent' && alert.emergency))
+    .sort((a, b) => dateMs(b.createdAt) - dateMs(a.createdAt));
+  res.json(paginate(needs, query));
+});
+
+app.get('/admin/messages', requireAdmin, (req, res) => {
+  const query = adminListQuery(req.query);
+  const status = query.status === 'all' ? '' : query.status;
+  const messages = db.messages
+    .map(adminMessageSummary)
+    .filter((message) =>
+      matchesSearch([message.text, message.houseName, message.senderName, message.moderationStatus], query.search)
+    )
+    .filter((message) => !status || normalize(message.moderationStatus) === status)
+    .sort((a, b) => dateMs(b.createdAt) - dateMs(a.createdAt));
+  res.json(paginate(messages, query));
+});
+
+app.patch('/admin/messages/:messageId/moderation', requireAdmin, (req, res) => {
+  const message = db.messages.find((item) => idOf(item.id) === idOf(req.params.messageId));
+  if (!message) return res.status(404).json({ message: 'Message not found' });
+  const moderationStatus = ['normal', 'reported', 'hidden', 'resolved'].includes(req.body.status)
+    ? req.body.status
+    : 'resolved';
+  message.moderationStatus = moderationStatus;
+  message.moderationNote = req.body.note?.toString() || '';
+  recordAdminAction(req, 'message.moderated', {
+    type: 'message',
+    id: message.id,
+    description: `Message ${message.id} set to ${moderationStatus}`,
+    tone: moderationStatus === 'hidden' ? 'danger' : 'info',
+  });
+  persistDb();
+  io.to(message.houseId).emit('messageUpdated', message);
+  res.json(adminMessageSummary(message));
+});
+
+app.get('/admin/reminders', requireAdmin, (req, res) => {
+  const query = adminListQuery(req.query);
+  const reminders = db.reminders
+    .map(adminReminderSummary)
+    .filter((reminder) =>
+      matchesSearch([reminder.title, reminder.note, reminder.houseName, reminder.creatorName, reminder.recurrence], query.search)
+    )
+    .sort((a, b) => dateMs(a.dueAt) - dateMs(b.dueAt));
+  res.json(paginate(reminders, query));
+});
+
+app.get('/admin/reports', requireAdmin, (req, res) => {
+  const query = adminListQuery(req.query);
+  const reports = db.messages
+    .map(adminMessageSummary)
+    .filter((message) => ['reported', 'hidden'].includes(message.moderationStatus))
+    .map((message) => ({
+      id: `message-${message.id}`,
+      type: 'message',
+      title: 'Reported chat message',
+      status: message.moderationStatus,
+      houseName: message.houseName,
+      targetId: message.id,
+      createdAt: message.createdAt,
+      summary: message.text,
+    }));
+  res.json(paginate(reports, query));
+});
+
+app.get('/admin/notifications', requireAdmin, (_req, res) => {
+  const usersWithTokens = db.users.filter((user) => user.fcmToken);
+  res.json({
+    tokens: usersWithTokens.length,
+    users: usersWithTokens.map((user) => ({
+      id: user.id,
+      name: user.name,
+      tokenRegistered: Boolean(user.fcmToken),
+      notificationPreferences: publicUser(user).notificationPreferences,
+    })),
+    firebaseAdminConfigured: Boolean(firebaseMessaging),
+    channels: notificationChannels,
+  });
+});
+
+app.get('/admin/versions', requireAdmin, (_req, res) => {
+  res.json(appVersionPolicy);
+});
+
+app.put('/admin/versions', requireAdmin, (req, res) => {
+  appVersionPolicy.latestVersion = req.body.latestVersion?.toString() || appVersionPolicy.latestVersion;
+  appVersionPolicy.minimumSupportedVersion = req.body.minimumSupportedVersion?.toString() || '';
+  appVersionPolicy.updateUrl = req.body.updateUrl?.toString() || '';
+  appVersionPolicy.releaseNotes = req.body.releaseNotes?.toString() || '';
+  appVersionPolicy.forceUpdate = req.body.forceUpdate === true;
+  recordAdminAction(req, 'version.policy.updated', {
+    type: 'version',
+    id: appVersionPolicy.latestVersion,
+    description: `Version policy updated to ${appVersionPolicy.latestVersion}`,
+    tone: 'info',
+  });
+  persistDb();
+  res.json(appVersionPolicy);
+});
+
+app.get('/admin/health', requireAdmin, (_req, res) => {
+  res.json(adminHealth());
+});
+
+app.get('/admin/admin-users', requireAdmin, (_req, res) => {
+  res.json({
+    items: [
+      {
+        id: 'dashboard-super-admin',
+        name: 'Dashboard Admin',
+        role: 'super_admin',
+        status: adminDashboardToken ? 'configured' : 'dev_fallback',
+        permissions: ['all'],
+      },
+    ],
+    total: 1,
+  });
+});
+
+app.get('/admin/audit-log', requireAdmin, (req, res) => {
+  const query = adminListQuery(req.query);
+  const logs = recentAdminActivity()
+    .filter((entry) =>
+      matchesSearch([entry.type, entry.description, entry.actorName, entry.targetType, entry.targetId], query.search)
+    )
+    .sort((a, b) => dateMs(b.at) - dateMs(a.at));
+  res.json(paginate(logs, query));
 });
 
 app.post('/auth/register', async (req, res) => {
