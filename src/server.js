@@ -118,6 +118,7 @@ const db = {
   shortcuts: [],
   passwordResetRequests: [],
   adminAuditLogs: [],
+  adminUsers: [],
   appVersionPolicy: {
     latestVersion: process.env.APP_LATEST_VERSION?.trim() || '0.1.4',
     minimumSupportedVersion: process.env.APP_MIN_SUPPORTED_VERSION?.trim() || '',
@@ -276,6 +277,32 @@ function sign(user) {
   return jwt.sign({ userId: user.id }, jwtSecret, { expiresIn: '30d' });
 }
 
+function signAdmin(admin) {
+  return jwt.sign(
+    {
+      admin: true,
+      adminId: admin.id,
+      role: admin.role,
+      bootstrap: admin.bootstrap === true,
+    },
+    jwtSecret,
+    { expiresIn: '12h' }
+  );
+}
+
+function publicAdmin(admin) {
+  return {
+    id: admin.id,
+    name: admin.name,
+    email: admin.email || null,
+    role: admin.role,
+    status: admin.status || 'active',
+    permissions: admin.permissions || [],
+    createdAt: admin.createdAt || null,
+    lastLoginAt: admin.lastLoginAt || null,
+  };
+}
+
 function requireAuth(req, res, next) {
   const header = req.headers.authorization || '';
   const token = header.startsWith('Bearer ') ? header.slice(7) : null;
@@ -296,19 +323,49 @@ function requireAdmin(req, res, next) {
   const header = req.headers.authorization || '';
   const token = header.startsWith('Bearer ') ? header.slice(7) : null;
   const expectedToken = adminDashboardToken || fallbackAdminDashboardToken;
-  if (!expectedToken) {
-    return res.status(503).json({
-      message: 'Admin dashboard token is not configured',
-    });
+  if (!token) return res.status(401).json({ message: 'Missing admin session' });
+
+  if (expectedToken && token === expectedToken) {
+    req.adminActor = {
+      id: 'dashboard-super-admin',
+      name: 'Super Admin',
+      role: 'super_admin',
+      permissions: ['all'],
+      bootstrap: true,
+    };
+    return next();
   }
-  if (!token || token !== expectedToken) {
-    return res.status(401).json({ message: 'Invalid admin token' });
+
+  try {
+    const payload = jwt.verify(token, jwtSecret);
+    if (payload.admin !== true) return res.status(401).json({ message: 'Invalid admin session' });
+
+    if (payload.bootstrap === true && payload.adminId === 'dashboard-super-admin') {
+      req.adminActor = {
+        id: 'dashboard-super-admin',
+        name: 'Super Admin',
+        role: 'super_admin',
+        permissions: ['all'],
+        bootstrap: true,
+      };
+      return next();
+    }
+
+    const admin = db.adminUsers.find((item) => item.id === payload.adminId);
+    if (!admin || admin.status !== 'active') {
+      return res.status(401).json({ message: 'Admin account is not active' });
+    }
+    req.adminActor = publicAdmin(admin);
+    return next();
+  } catch {
+    return res.status(401).json({ message: 'Invalid admin session' });
   }
-  req.adminActor = {
-    id: 'dashboard',
-    name: 'Dashboard Admin',
-    role: 'super_admin',
-  };
+}
+
+function requireSuperAdmin(req, res, next) {
+  if (req.adminActor?.role !== 'super_admin') {
+    return res.status(403).json({ message: 'Super admin permission is required' });
+  }
   next();
 }
 
@@ -1132,6 +1189,59 @@ app.get('/', (_req, res) => {
   });
 });
 
+app.post('/admin/auth/token-login', (req, res) => {
+  const token = req.body.token?.toString().trim();
+  const expectedToken = adminDashboardToken || fallbackAdminDashboardToken;
+  if (!expectedToken) {
+    return res.status(503).json({ message: 'Admin dashboard token is not configured' });
+  }
+  if (!token || token !== expectedToken) {
+    return res.status(401).json({ message: 'Invalid super admin token' });
+  }
+  const admin = {
+    id: 'dashboard-super-admin',
+    name: 'Super Admin',
+    role: 'super_admin',
+    status: adminDashboardToken ? 'configured' : 'dev_fallback',
+    permissions: ['all'],
+    bootstrap: true,
+  };
+  recordAdminAction({ adminActor: admin }, 'admin.auth.token_login', {
+    type: 'admin',
+    id: admin.id,
+    description: 'Super admin signed in with dashboard token',
+    tone: 'success',
+  });
+  res.json({ token: signAdmin(admin), admin: publicAdmin(admin) });
+});
+
+app.post('/admin/auth/login', async (req, res) => {
+  const email = req.body.email?.toString().trim().toLowerCase();
+  const password = req.body.password?.toString() || '';
+  if (!email || !password) {
+    return res.status(400).json({ message: 'Email and password are required' });
+  }
+  const admin = db.adminUsers.find((item) => normalize(item.email) === normalize(email));
+  if (!admin || admin.status !== 'active') {
+    return res.status(401).json({ message: 'Invalid admin credentials' });
+  }
+  const ok = await bcrypt.compare(password, admin.passwordHash || '');
+  if (!ok) return res.status(401).json({ message: 'Invalid admin credentials' });
+  admin.lastLoginAt = new Date().toISOString();
+  recordAdminAction({ adminActor: publicAdmin(admin) }, 'admin.auth.login', {
+    type: 'admin',
+    id: admin.id,
+    description: `${admin.name} signed in`,
+    tone: 'success',
+  });
+  persistDb();
+  res.json({ token: signAdmin(admin), admin: publicAdmin(admin) });
+});
+
+app.get('/admin/auth/me', requireAdmin, (req, res) => {
+  res.json({ admin: req.adminActor });
+});
+
 app.get('/admin/overview', requireAdmin, (_req, res) => {
   res.json(adminOverview());
 });
@@ -1314,18 +1424,66 @@ app.get('/admin/health', requireAdmin, (_req, res) => {
 });
 
 app.get('/admin/admin-users', requireAdmin, (_req, res) => {
+  const superAdmin = {
+    id: 'dashboard-super-admin',
+    name: 'Super Admin',
+    email: null,
+    role: 'super_admin',
+    status: adminDashboardToken ? 'configured' : 'dev_fallback',
+    permissions: ['all'],
+    createdAt: null,
+    lastLoginAt: null,
+  };
+  const admins = [superAdmin, ...db.adminUsers.map(publicAdmin)];
   res.json({
-    items: [
-      {
-        id: 'dashboard-super-admin',
-        name: 'Dashboard Admin',
-        role: 'super_admin',
-        status: adminDashboardToken ? 'configured' : 'dev_fallback',
-        permissions: ['all'],
-      },
-    ],
-    total: 1,
+    items: admins,
+    total: admins.length,
   });
+});
+
+app.post('/admin/admin-users', requireAdmin, requireSuperAdmin, async (req, res) => {
+  const name = req.body.name?.toString().trim();
+  const email = req.body.email?.toString().trim().toLowerCase();
+  const password = req.body.password?.toString() || '';
+  const role = ['admin', 'support', 'moderator', 'super_admin'].includes(req.body.role)
+    ? req.body.role
+    : 'support';
+  const permissions = Array.isArray(req.body.permissions)
+    ? req.body.permissions.map((item) => item.toString()).filter(Boolean)
+    : role === 'super_admin'
+      ? ['all']
+      : ['overview:view', 'users:view', 'houses:view', 'needs:view', 'reports:view'];
+
+  if (!name || !email || !password) {
+    return res.status(400).json({ message: 'Name, email, and password are required' });
+  }
+  if (password.length < 8) {
+    return res.status(400).json({ message: 'Admin password must be at least 8 characters' });
+  }
+  const duplicate = db.adminUsers.find((item) => normalize(item.email) === normalize(email));
+  if (duplicate) return res.status(409).json({ message: 'Admin email already exists' });
+
+  const admin = {
+    id: uuid(),
+    name,
+    email,
+    role,
+    permissions,
+    status: 'active',
+    passwordHash: await bcrypt.hash(password, 10),
+    createdAt: new Date().toISOString(),
+    createdBy: req.adminActor.id,
+    lastLoginAt: null,
+  };
+  db.adminUsers.push(admin);
+  recordAdminAction(req, 'admin.created', {
+    type: 'admin',
+    id: admin.id,
+    description: `${admin.name} admin account created`,
+    tone: 'success',
+  });
+  persistDb();
+  res.status(201).json(publicAdmin(admin));
 });
 
 app.get('/admin/audit-log', requireAdmin, (req, res) => {
