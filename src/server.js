@@ -796,6 +796,62 @@ function logPushFailures(type, response, tokenOwners) {
   });
 }
 
+async function sendAdminNotification({ recipients, title, body, data = {} }) {
+  if (!firebaseMessaging) {
+    const error = new Error('Firebase Admin is not configured');
+    error.statusCode = 503;
+    throw error;
+  }
+
+  const tokenOwners = tokensForUsers(recipients);
+  const tokens = tokenOwners.map((item) => item.token);
+  if (tokens.length === 0) {
+    const error = new Error('No FCM tokens found for selected users');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const response = await firebaseMessaging.sendEachForMulticast({
+    tokens,
+    notification: { title, body },
+    data: pushData({
+      type: 'adminNotification',
+      title,
+      body,
+      ...data,
+    }),
+    android: {
+      priority: 'high',
+      notification: {
+        channelId: notificationChannels.needAlerts,
+        icon: 'ic_notification_house',
+        sound: 'default',
+        priority: 'high',
+        visibility: 'public',
+      },
+    },
+    apns: {
+      payload: {
+        aps: {
+          sound: 'default',
+        },
+      },
+    },
+  });
+  removeBadPushTokens(tokens, response);
+  logPushFailures('Admin notification', response, tokenOwners);
+  logPushResult('Admin notification', response, {
+    tokenCount: tokens.length,
+    recipientCount: recipients.length,
+  });
+  return {
+    successCount: response.successCount,
+    failureCount: response.failureCount,
+    tokenCount: tokens.length,
+    recipientCount: recipients.length,
+  };
+}
+
 function pushData(values) {
   return Object.fromEntries(
     Object.entries(values).map(([key, value]) => [
@@ -1385,18 +1441,63 @@ app.get('/admin/reports', requireAdmin, (req, res) => {
 });
 
 app.get('/admin/notifications', requireAdmin, (_req, res) => {
-  const usersWithTokens = db.users.filter((user) => user.fcmToken);
+  const usersWithTokens = db.users.filter((user) => (user.fcmTokens || []).length > 0);
   res.json({
-    tokens: usersWithTokens.length,
+    tokens: usersWithTokens.reduce((total, user) => total + (user.fcmTokens || []).length, 0),
     users: usersWithTokens.map((user) => ({
       id: user.id,
       name: user.name,
-      tokenRegistered: Boolean(user.fcmToken),
+      email: user.email || null,
+      phone: user.phone || null,
+      tokenRegistered: (user.fcmTokens || []).length > 0,
+      tokenCount: (user.fcmTokens || []).length,
       notificationPreferences: publicUser(user).notificationPreferences,
     })),
     firebaseAdminConfigured: Boolean(firebaseMessaging),
     channels: notificationChannels,
   });
+});
+
+app.post('/admin/notifications/send', requireAdmin, async (req, res) => {
+  const title = req.body.title?.toString().trim();
+  const body = req.body.body?.toString().trim();
+  const target = req.body.target === 'selected' ? 'selected' : 'all';
+  const userIds = Array.isArray(req.body.userIds) ? req.body.userIds.map(idOf).filter(Boolean) : [];
+
+  if (!title || !body) {
+    return res.status(400).json({ message: 'Notification title and body are required' });
+  }
+  if (target === 'selected' && userIds.length === 0) {
+    return res.status(400).json({ message: 'Choose at least one user' });
+  }
+
+  const recipients = db.users.filter((user) => {
+    const hasTokens = (user.fcmTokens || []).length > 0;
+    if (!hasTokens) return false;
+    return target === 'all' || userIds.includes(idOf(user.id));
+  });
+
+  try {
+    const result = await sendAdminNotification({
+      recipients,
+      title,
+      body,
+      data: {
+        sentByAdminId: req.adminActor.id,
+        sentByAdminName: req.adminActor.name,
+        target,
+      },
+    });
+    recordAdminAction(req, 'notification.sent', {
+      type: 'notification',
+      id: uuid(),
+      description: `Notification sent to ${result.recipientCount} users`,
+      tone: result.failureCount > 0 ? 'warning' : 'success',
+    });
+    res.json({ ok: true, ...result });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ message: error.message || 'Could not send notification' });
+  }
 });
 
 app.get('/admin/versions', requireAdmin, (_req, res) => {
