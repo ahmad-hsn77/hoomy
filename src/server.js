@@ -118,6 +118,7 @@ const db = {
   shortcuts: [],
   passwordResetRequests: [],
   adminAuditLogs: [],
+  notificationLogs: [],
   adminUsers: [],
   appVersionPolicy: {
     latestVersion: process.env.APP_LATEST_VERSION?.trim() || '0.1.4',
@@ -796,10 +797,89 @@ function logPushFailures(type, response, tokenOwners) {
   });
 }
 
+function pushDeliveryLog(response, tokenOwners) {
+  return (response.responses || []).map((item, index) => {
+    const owner = tokenOwners[index] || {};
+    return {
+      userId: owner.userId || null,
+      userName: owner.userName || 'Unknown user',
+      tokenPrefix: owner.token ? owner.token.slice(0, 12) : '',
+      status: item.success ? 'success' : 'failed',
+      code: item.error?.code || null,
+      message: item.error?.message || null,
+    };
+  });
+}
+
+function recordNotificationLog(entry) {
+  const normalized = {
+    id: uuid(),
+    at: new Date().toISOString(),
+    type: entry.type || 'notification',
+    title: entry.title || 'Notification',
+    body: entry.body || '',
+    status: entry.status || 'success',
+    summary: entry.summary || '',
+    recipientCount: entry.recipientCount || 0,
+    tokenCount: entry.tokenCount || 0,
+    successCount: entry.successCount || 0,
+    failureCount: entry.failureCount || 0,
+    deliveryLog: entry.deliveryLog || [],
+    meta: entry.meta || {},
+  };
+  db.notificationLogs.unshift(normalized);
+  db.notificationLogs = db.notificationLogs.slice(0, 500);
+  persistDb();
+  return normalized;
+}
+
+function recordNotificationResponse({ type, title, body, response, tokenOwners, recipientCount, meta = {} }) {
+  return recordNotificationLog({
+    type,
+    title,
+    body,
+    status: response.failureCount > 0 ? 'warning' : 'success',
+    summary: `${response.successCount} delivered, ${response.failureCount} failed`,
+    recipientCount,
+    tokenCount: tokenOwners.length,
+    successCount: response.successCount,
+    failureCount: response.failureCount,
+    deliveryLog: pushDeliveryLog(response, tokenOwners),
+    meta,
+  });
+}
+
+function recordNotificationFailure({ type, title, body, error, recipientCount = 0, tokenCount = 0, meta = {} }) {
+  return recordNotificationLog({
+    type,
+    title,
+    body,
+    status: 'danger',
+    summary: error?.message || 'Notification send failed',
+    recipientCount,
+    tokenCount,
+    successCount: 0,
+    failureCount: tokenCount,
+    deliveryLog: [],
+    meta: {
+      ...meta,
+      code: error?.code || null,
+    },
+  });
+}
+
 async function sendAdminNotification({ recipients, title, body, data = {} }) {
   if (!firebaseMessaging) {
     const error = new Error('Firebase Admin is not configured');
     error.statusCode = 503;
+    recordNotificationFailure({
+      type: 'admin',
+      title,
+      body,
+      error,
+      recipientCount: recipients.length,
+      meta: data,
+    });
     throw error;
   }
 
@@ -808,6 +888,14 @@ async function sendAdminNotification({ recipients, title, body, data = {} }) {
   if (tokens.length === 0) {
     const error = new Error('No FCM tokens found for selected users');
     error.statusCode = 400;
+    recordNotificationFailure({
+      type: 'admin',
+      title,
+      body,
+      error,
+      recipientCount: recipients.length,
+      meta: data,
+    });
     throw error;
   }
 
@@ -844,11 +932,22 @@ async function sendAdminNotification({ recipients, title, body, data = {} }) {
     tokenCount: tokens.length,
     recipientCount: recipients.length,
   });
+  const notificationLog = recordNotificationResponse({
+    type: 'admin',
+    title,
+    body,
+    response,
+    tokenOwners,
+    recipientCount: recipients.length,
+    meta: data,
+  });
   return {
     successCount: response.successCount,
     failureCount: response.failureCount,
     tokenCount: tokens.length,
     recipientCount: recipients.length,
+    deliveryLog: notificationLog.deliveryLog,
+    notificationLog,
   };
 }
 
@@ -926,8 +1025,22 @@ function logPushError(type, error, extra = {}) {
 }
 
 async function sendMessagePush({ house, message, sender }) {
+  const senderName = sender?.name || 'Family';
+  const title = message.system ? 'Family update' : `${senderName} in family chat`;
+  const body = message.audio
+    ? 'Voice message'
+    : message.image
+      ? 'Photo'
+      : message.text || 'New family message';
   if (!firebaseMessaging) {
     console.warn('Message push skipped: Firebase Admin is not configured');
+    recordNotificationFailure({
+      type: 'message',
+      title,
+      body,
+      error: new Error('Firebase Admin is not configured'),
+      meta: { houseId: house.id, messageId: message.id },
+    });
     return;
   }
 
@@ -946,16 +1059,17 @@ async function sendMessagePush({ house, message, sender }) {
       recipientIds,
       recipientCount: recipients.length,
     });
+    recordNotificationFailure({
+      type: 'message',
+      title,
+      body,
+      error: new Error('No recipient FCM tokens'),
+      recipientCount: recipients.length,
+      meta: { houseId: house.id, messageId: message.id, recipientIds },
+    });
     return;
   }
 
-  const senderName = sender?.name || 'Family';
-  const title = message.system ? 'Family update' : `${senderName} in family chat`;
-  const body = message.audio
-    ? 'Voice message'
-    : message.image
-      ? 'Photo'
-      : message.text || 'New family message';
   const visibleLines = latestChatPushLines(house.id);
   const notificationBody = visibleLines.length > 0 ? visibleLines.join('\n') : body;
   try {
@@ -1007,11 +1121,29 @@ async function sendMessagePush({ house, message, sender }) {
       tokenCount: tokens.length,
       messageId: message.id,
     });
+    recordNotificationResponse({
+      type: 'message',
+      title: 'Family chat',
+      body: notificationBody,
+      response,
+      tokenOwners,
+      recipientCount: recipients.length,
+      meta: { houseId: house.id, messageId: message.id },
+    });
   } catch (error) {
     logPushError('Message', error, {
       houseId: house.id,
       tokenCount: tokens.length,
       messageId: message.id,
+    });
+    recordNotificationFailure({
+      type: 'message',
+      title: 'Family chat',
+      body: notificationBody,
+      error,
+      recipientCount: recipients.length,
+      tokenCount: tokens.length,
+      meta: { houseId: house.id, messageId: message.id },
     });
     throw error;
   }
@@ -1028,13 +1160,22 @@ function alertRecipientUserIds({ house, alert, creatorId }) {
 }
 
 async function sendAlertPush({ house, alert, creator }) {
+  const emergency = alert.emergency === true;
+  const title = emergency ? `Emergency need: ${alert.title}` : `House need: ${alert.title}`;
+  const body = alert.note || `${creator.name} added a house need.`;
   if (!firebaseMessaging) {
     console.warn('Alert push skipped: Firebase Admin is not configured');
+    recordNotificationFailure({
+      type: emergency ? 'emergency_alert' : 'alert',
+      title,
+      body,
+      error: new Error('Firebase Admin is not configured'),
+      meta: { houseId: house.id, alertId: alert.id, emergency },
+    });
     return;
   }
 
   const recipientIds = alertRecipientUserIds({ house, alert, creatorId: creator.id });
-  const emergency = alert.emergency === true;
   const recipients = db.users.filter((user) =>
     recipientIds.includes(idOf(user.id)) &&
     (emergency
@@ -1050,11 +1191,17 @@ async function sendAlertPush({ house, alert, creator }) {
       recipientIds,
       recipientCount: recipients.length,
     });
+    recordNotificationFailure({
+      type: emergency ? 'emergency_alert' : 'alert',
+      title,
+      body,
+      error: new Error('No recipient FCM tokens'),
+      recipientCount: recipients.length,
+      meta: { houseId: house.id, alertId: alert.id, emergency, recipientIds },
+    });
     return;
   }
 
-  const title = emergency ? `Emergency need: ${alert.title}` : `House need: ${alert.title}`;
-  const body = alert.note || `${creator.name} added a house need.`;
   try {
     const payload = {
       tokens,
@@ -1107,6 +1254,15 @@ async function sendAlertPush({ house, alert, creator }) {
       tokenCount: tokens.length,
       emergency,
     });
+    recordNotificationResponse({
+      type: emergency ? 'emergency_alert' : 'alert',
+      title,
+      body,
+      response,
+      tokenOwners,
+      recipientCount: recipients.length,
+      meta: { houseId: house.id, alertId: alert.id, emergency },
+    });
   } catch (error) {
     logPushError('Alert', error, {
       houseId: house.id,
@@ -1114,13 +1270,31 @@ async function sendAlertPush({ house, alert, creator }) {
       tokenCount: tokens.length,
       emergency,
     });
+    recordNotificationFailure({
+      type: emergency ? 'emergency_alert' : 'alert',
+      title,
+      body,
+      error,
+      recipientCount: recipients.length,
+      tokenCount: tokens.length,
+      meta: { houseId: house.id, alertId: alert.id, emergency },
+    });
     throw error;
   }
 }
 
 async function sendReminderPush({ house, reminder, creator }) {
+  const title = `Family reminder: ${reminder.title}`;
+  const body = reminder.note || `${creator.name} added a reminder.`;
   if (!firebaseMessaging) {
     console.warn('Reminder push skipped: Firebase Admin is not configured');
+    recordNotificationFailure({
+      type: 'reminder',
+      title,
+      body,
+      error: new Error('Firebase Admin is not configured'),
+      meta: { houseId: house.id, reminderId: reminder.id },
+    });
     return;
   }
 
@@ -1137,11 +1311,17 @@ async function sendReminderPush({ house, reminder, creator }) {
       recipientIds,
       recipientCount: recipients.length,
     });
+    recordNotificationFailure({
+      type: 'reminder',
+      title,
+      body,
+      error: new Error('No recipient FCM tokens'),
+      recipientCount: recipients.length,
+      meta: { houseId: house.id, reminderId: reminder.id, recipientIds },
+    });
     return;
   }
 
-  const title = `Family reminder: ${reminder.title}`;
-  const body = reminder.note || `${creator.name} added a reminder.`;
   try {
     const response = await firebaseMessaging.sendEachForMulticast({
       tokens,
@@ -1192,11 +1372,29 @@ async function sendReminderPush({ house, reminder, creator }) {
       reminderId: reminder.id,
       tokenCount: tokens.length,
     });
+    recordNotificationResponse({
+      type: 'reminder',
+      title,
+      body,
+      response,
+      tokenOwners,
+      recipientCount: recipients.length,
+      meta: { houseId: house.id, reminderId: reminder.id },
+    });
   } catch (error) {
     logPushError('Reminder', error, {
       houseId: house.id,
       reminderId: reminder.id,
       tokenCount: tokens.length,
+    });
+    recordNotificationFailure({
+      type: 'reminder',
+      title,
+      body,
+      error,
+      recipientCount: recipients.length,
+      tokenCount: tokens.length,
+      meta: { houseId: house.id, reminderId: reminder.id },
     });
     throw error;
   }
@@ -1455,6 +1653,7 @@ app.get('/admin/notifications', requireAdmin, (_req, res) => {
     })),
     firebaseAdminConfigured: Boolean(firebaseMessaging),
     channels: notificationChannels,
+    notificationLogs: db.notificationLogs.slice(0, 100),
   });
 });
 
@@ -1731,18 +1930,34 @@ app.post('/devices/fcm-token', requireAuth, (req, res) => {
 });
 
 app.post('/devices/test-notification', requireAuth, async (req, res) => {
+  const title = req.body.title?.toString() || 'Hoomy alert test';
+  const body = req.body.body?.toString() || 'Backend push notifications are connected.';
   if (!firebaseMessaging) {
+    recordNotificationFailure({
+      type: 'test',
+      title,
+      body,
+      error: new Error('Firebase Admin is not configured'),
+      recipientCount: 1,
+      meta: { userId: req.user.id, emergency: req.body.emergency === true },
+    });
     return res.status(503).json({ message: 'Firebase Admin is not configured' });
   }
 
   const tokenOwners = tokensForUsers([req.user]);
   const tokens = tokenOwners.map((item) => item.token);
   if (tokens.length === 0) {
+    recordNotificationFailure({
+      type: 'test',
+      title,
+      body,
+      error: new Error('No FCM token registered for this user'),
+      recipientCount: 1,
+      meta: { userId: req.user.id, emergency: req.body.emergency === true },
+    });
     return res.status(400).json({ message: 'No FCM token registered for this user' });
   }
 
-  const title = req.body.title?.toString() || 'Hoomy alert test';
-  const body = req.body.body?.toString() || 'Backend push notifications are connected.';
   let response;
   try {
     response = await firebaseMessaging.sendEachForMulticast({
@@ -1786,6 +2001,15 @@ app.post('/devices/test-notification', requireAuth, async (req, res) => {
     });
   } catch (error) {
     logPushError('Test alert', error, { userId: req.user.id, tokenCount: tokens.length });
+    recordNotificationFailure({
+      type: 'test',
+      title,
+      body,
+      error,
+      recipientCount: 1,
+      tokenCount: tokens.length,
+      meta: { userId: req.user.id, emergency: req.body.emergency === true },
+    });
     return res.status(500).json({
       message: 'Firebase test notification failed',
       code: error.code,
@@ -1796,10 +2020,20 @@ app.post('/devices/test-notification', requireAuth, async (req, res) => {
   removeBadPushTokens(tokens, response);
   logPushFailures('Test alert', response, tokenOwners);
   logPushResult('Test alert', response, { userId: req.user.id, tokenCount: tokens.length });
+  const notificationLog = recordNotificationResponse({
+    type: 'test',
+    title,
+    body,
+    response,
+    tokenOwners,
+    recipientCount: 1,
+    meta: { userId: req.user.id, emergency: req.body.emergency === true },
+  });
   res.json({
     ok: response.failureCount === 0,
     successCount: response.successCount,
     failureCount: response.failureCount,
+    notificationLog,
     errors: response.responses.flatMap((item, index) => {
       if (item.success) return [];
       return [{
