@@ -1679,11 +1679,30 @@ app.get('/admin/versions', requireAdmin, (_req, res) => {
 });
 
 app.put('/admin/versions', requireAdmin, (req, res) => {
-  appVersionPolicy.latestVersion = req.body.latestVersion?.toString() || appVersionPolicy.latestVersion;
-  appVersionPolicy.minimumSupportedVersion = req.body.minimumSupportedVersion?.toString() || '';
-  appVersionPolicy.updateUrl = req.body.updateUrl?.toString() || '';
-  appVersionPolicy.releaseNotes = req.body.releaseNotes?.toString() || '';
+  const latestVersion = req.body.latestVersion?.toString().trim();
+  const minimumSupportedVersion = req.body.minimumSupportedVersion?.toString().trim() || '';
+  const updateUrl = req.body.updateUrl?.toString().trim() || '';
+  const releaseNotes = req.body.releaseNotes?.toString().trim() || '';
+  if (!latestVersion) {
+    return res.status(400).json({ message: 'Latest version is required' });
+  }
+  if (updateUrl) {
+    try {
+      const parsedUrl = new URL(updateUrl);
+      if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+        return res.status(400).json({ message: 'Update URL must start with http or https' });
+      }
+    } catch {
+      return res.status(400).json({ message: 'Update URL must be a valid URL' });
+    }
+  }
+  appVersionPolicy.latestVersion = latestVersion;
+  appVersionPolicy.minimumSupportedVersion = minimumSupportedVersion;
+  appVersionPolicy.updateUrl = updateUrl;
+  appVersionPolicy.releaseNotes = releaseNotes;
   appVersionPolicy.forceUpdate = req.body.forceUpdate === true;
+  appVersionPolicy.updatedAt = new Date().toISOString();
+  appVersionPolicy.updatedBy = req.adminActor.id;
   recordAdminAction(req, 'version.policy.updated', {
     type: 'version',
     id: appVersionPolicy.latestVersion,
