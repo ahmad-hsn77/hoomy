@@ -1034,13 +1034,6 @@ async function sendMessagePush({ house, message, sender }) {
       : message.text || 'New family message';
   if (!firebaseMessaging) {
     console.warn('Message push skipped: Firebase Admin is not configured');
-    recordNotificationFailure({
-      type: 'message',
-      title,
-      body,
-      error: new Error('Firebase Admin is not configured'),
-      meta: { houseId: house.id, messageId: message.id },
-    });
     return;
   }
 
@@ -1058,14 +1051,6 @@ async function sendMessagePush({ house, message, sender }) {
       houseId: house.id,
       recipientIds,
       recipientCount: recipients.length,
-    });
-    recordNotificationFailure({
-      type: 'message',
-      title,
-      body,
-      error: new Error('No recipient FCM tokens'),
-      recipientCount: recipients.length,
-      meta: { houseId: house.id, messageId: message.id, recipientIds },
     });
     return;
   }
@@ -1121,29 +1106,11 @@ async function sendMessagePush({ house, message, sender }) {
       tokenCount: tokens.length,
       messageId: message.id,
     });
-    recordNotificationResponse({
-      type: 'message',
-      title: 'Family chat',
-      body: notificationBody,
-      response,
-      tokenOwners,
-      recipientCount: recipients.length,
-      meta: { houseId: house.id, messageId: message.id },
-    });
   } catch (error) {
     logPushError('Message', error, {
       houseId: house.id,
       tokenCount: tokens.length,
       messageId: message.id,
-    });
-    recordNotificationFailure({
-      type: 'message',
-      title: 'Family chat',
-      body: notificationBody,
-      error,
-      recipientCount: recipients.length,
-      tokenCount: tokens.length,
-      meta: { houseId: house.id, messageId: message.id },
     });
     throw error;
   }
