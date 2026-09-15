@@ -1678,7 +1678,7 @@ app.get('/admin/versions', requireAdmin, (_req, res) => {
   res.json(appVersionPolicy);
 });
 
-app.put('/admin/versions', requireAdmin, (req, res) => {
+app.put('/admin/versions', requireAdmin, requireSuperAdmin, (req, res) => {
   const latestVersion = req.body.latestVersion?.toString().trim();
   const minimumSupportedVersion = req.body.minimumSupportedVersion?.toString().trim() || '';
   const updateUrl = req.body.updateUrl?.toString().trim() || '';
@@ -2037,6 +2037,47 @@ app.post('/devices/test-notification', requireAuth, async (req, res) => {
       }];
     }),
   });
+});
+
+app.post('/devices/notification-log', requireAuth, (req, res) => {
+  const type = req.body.type?.toString().trim() || 'device';
+  if (type === 'message' || type === 'chat') {
+    return res.status(400).json({ message: 'Chat notifications are not logged for privacy' });
+  }
+  const title = req.body.title?.toString().trim() || 'Device notification';
+  const body = req.body.body?.toString().trim() || '';
+  const status = ['success', 'warning', 'danger', 'info'].includes(req.body.status)
+    ? req.body.status
+    : 'success';
+  const summary = req.body.summary?.toString().trim() || 'Reported by mobile app';
+  const meta = req.body.meta && typeof req.body.meta === 'object' && !Array.isArray(req.body.meta)
+    ? req.body.meta
+    : {};
+  const notificationLog = recordNotificationLog({
+    type,
+    title,
+    body,
+    status,
+    summary,
+    recipientCount: 1,
+    tokenCount: 0,
+    successCount: status === 'danger' ? 0 : 1,
+    failureCount: status === 'danger' ? 1 : 0,
+    deliveryLog: [{
+      userId: req.user.id,
+      userName: req.user.name || 'Mobile user',
+      tokenPrefix: 'local',
+      status: status === 'danger' ? 'failed' : 'success',
+      code: null,
+      message: summary,
+    }],
+    meta: {
+      ...meta,
+      source: 'mobile',
+      userId: req.user.id,
+    },
+  });
+  res.status(201).json({ ok: true, notificationLog });
 });
 
 app.put('/users/me/notification-preferences', requireAuth, (req, res) => {
