@@ -680,6 +680,10 @@ function createHouseMessage({
   image = false,
   imageBase64 = null,
   imageMimeType = null,
+  encryptedText = null,
+  encryptionNonce = null,
+  encryptionAlgorithm = null,
+  encryptionVersion = null,
 }) {
   const replyTo = replyToMessageId
     ? db.messages.find((item) => item.houseId === houseId && item.id === replyToMessageId)
@@ -705,6 +709,10 @@ function createHouseMessage({
     image: Boolean(image),
     imageBase64: image ? imageBase64 : null,
     imageMimeType: image ? imageMimeType : null,
+    encryptedText,
+    encryptionNonce,
+    encryptionAlgorithm,
+    encryptionVersion,
     createdAt: new Date().toISOString(),
   };
   db.messages.push(message);
@@ -2337,6 +2345,13 @@ app.post('/houses/:houseId/messages', requireAuth, requireHouseMember, (req, res
   const audio = req.body.audio === true;
   const image = req.body.image === true;
   const text = (req.body.text || '').toString().trim();
+  const encryptedText = req.body.encryptedText?.toString() || null;
+  const encryptionNonce = req.body.encryptionNonce?.toString() || null;
+  const encryptionAlgorithm = req.body.encryptionAlgorithm?.toString() || null;
+  const encryptionVersion = Number.isFinite(Number(req.body.encryptionVersion))
+    ? Math.max(1, Math.round(Number(req.body.encryptionVersion)))
+    : null;
+  const encryptedPayloadPresent = Boolean(encryptedText || encryptionNonce || encryptionAlgorithm || encryptionVersion);
   const audioBase64 = req.body.audioBase64?.toString() || null;
   const audioMimeType = req.body.audioMimeType?.toString() || 'audio/mp4';
   const audioDurationSeconds = Number.isFinite(Number(req.body.audioDurationSeconds))
@@ -2348,11 +2363,16 @@ app.post('/houses/:houseId/messages', requireAuth, requireHouseMember, (req, res
   if (audio && !audioBase64) return res.status(400).json({ message: 'Audio data is required' });
   if (image && !imageBase64) return res.status(400).json({ message: 'Image data is required' });
   if (!audio && !image && !text) return res.status(400).json({ message: 'Message text is required' });
+  if (encryptedPayloadPresent && audio) return res.status(400).json({ message: 'Voice messages cannot include encrypted text' });
+  if (encryptedPayloadPresent && image) return res.status(400).json({ message: 'Image messages cannot include encrypted text' });
+  if (encryptedPayloadPresent && (!encryptedText || !encryptionNonce || !encryptionAlgorithm || !encryptionVersion)) {
+    return res.status(400).json({ message: 'Encrypted message payload is incomplete' });
+  }
 
   const message = createHouseMessage({
     houseId: req.house.id,
     senderId: req.user.id,
-    text: audio ? text || 'Voice message' : image ? text || 'Photo' : text,
+    text: encryptedPayloadPresent ? 'Encrypted message' : audio ? text || 'Voice message' : image ? text || 'Photo' : text,
     replyToMessageId,
     audio,
     audioBase64,
@@ -2361,6 +2381,10 @@ app.post('/houses/:houseId/messages', requireAuth, requireHouseMember, (req, res
     image,
     imageBase64,
     imageMimeType,
+    encryptedText,
+    encryptionNonce,
+    encryptionAlgorithm,
+    encryptionVersion,
   });
   res.status(201).json(message);
 });
@@ -2374,9 +2398,23 @@ app.put('/houses/:houseId/messages/:messageId', requireAuth, requireHouseMember,
   if (message.senderId !== req.user.id) return res.status(403).json({ message: 'You can edit only your own messages' });
 
   const text = (req.body.text || '').toString().trim();
+  const encryptedText = req.body.encryptedText?.toString() || null;
+  const encryptionNonce = req.body.encryptionNonce?.toString() || null;
+  const encryptionAlgorithm = req.body.encryptionAlgorithm?.toString() || null;
+  const encryptionVersion = Number.isFinite(Number(req.body.encryptionVersion))
+    ? Math.max(1, Math.round(Number(req.body.encryptionVersion)))
+    : null;
+  const encryptedPayloadPresent = Boolean(encryptedText || encryptionNonce || encryptionAlgorithm || encryptionVersion);
   if (!text) return res.status(400).json({ message: 'Message text is required' });
+  if (encryptedPayloadPresent && (!encryptedText || !encryptionNonce || !encryptionAlgorithm || !encryptionVersion)) {
+    return res.status(400).json({ message: 'Encrypted message payload is incomplete' });
+  }
 
-  message.text = text;
+  message.text = encryptedPayloadPresent ? 'Encrypted message' : text;
+  message.encryptedText = encryptedPayloadPresent ? encryptedText : null;
+  message.encryptionNonce = encryptedPayloadPresent ? encryptionNonce : null;
+  message.encryptionAlgorithm = encryptedPayloadPresent ? encryptionAlgorithm : null;
+  message.encryptionVersion = encryptedPayloadPresent ? encryptionVersion : null;
   message.edited = true;
   message.editedAt = new Date().toISOString();
   persistDb();
