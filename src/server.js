@@ -291,7 +291,7 @@ function signAdmin(admin) {
   );
 }
 
-const superAdminPermissions = ['all', 'reminders:delete'];
+const superAdminPermissions = ['all', 'reminders:delete', 'reminders:stop'];
 
 function adminPermissions(admin) {
   const permissions = Array.isArray(admin.permissions) ? admin.permissions : [];
@@ -443,6 +443,14 @@ function houseAlerts(house) {
 }
 
 function houseReminders(house) {
+  return db.reminders.filter((item) =>
+    idOf(item.houseId) === idOf(house.id) &&
+    !item.deletedAt &&
+    !item.stoppedAt
+  );
+}
+
+function adminHouseReminders(house) {
   return db.reminders.filter((item) => idOf(item.houseId) === idOf(house.id));
 }
 
@@ -594,11 +602,13 @@ function adminMessageSummary(message) {
 function adminReminderSummary(reminder) {
   const house = houseForId(reminder.houseId);
   const creator = userForId(reminder.createdBy);
+  const state = reminder.deletedAt ? 'deleted' : reminder.stoppedAt ? 'stopped' : 'active';
   return {
     ...reminder,
     houseName: house?.name || 'Unknown house',
     creatorName: creator?.name || 'Unknown member',
-    deliveryStatus: reminder.deliveryStatus || 'scheduled',
+    state,
+    deliveryStatus: reminder.deliveryStatus || (state === 'active' ? 'scheduled' : state),
   };
 }
 
@@ -1437,6 +1447,69 @@ async function sendReminderPush({ house, reminder, creator }) {
   }
 }
 
+async function sendReminderCancellationPush({ house, reminder, action }) {
+  if (!firebaseMessaging) {
+    console.warn('Reminder cancellation push skipped: Firebase Admin is not configured');
+    return;
+  }
+
+  const recipients = db.users.filter((user) =>
+    house.members.some((member) => idOf(member.userId) === idOf(user.id))
+  );
+  const tokenOwners = tokensForUsers(recipients);
+  const tokens = tokenOwners.map((item) => item.token);
+  if (tokens.length === 0) {
+    console.warn('Reminder cancellation push skipped: no recipient FCM tokens', {
+      houseId: house.id,
+      reminderId: reminder.id,
+      recipientCount: recipients.length,
+    });
+    return;
+  }
+
+  try {
+    const response = await firebaseMessaging.sendEachForMulticast({
+      tokens,
+      data: pushData({
+        type: action === 'stopped' ? 'reminderStopped' : 'reminderDeleted',
+        reminderId: reminder.id,
+        houseId: house.id,
+        title: reminder.title || '',
+      }),
+      android: {
+        priority: 'high',
+      },
+      apns: {
+        headers: {
+          'apns-priority': '5',
+          'apns-push-type': 'background',
+        },
+        payload: {
+          aps: {
+            contentAvailable: true,
+          },
+        },
+      },
+    });
+
+    removeBadPushTokens(tokens, response);
+    logPushFailures('Reminder cancellation', response, tokenOwners);
+    logPushResult('Reminder cancellation', response, {
+      houseId: house.id,
+      reminderId: reminder.id,
+      action,
+      tokenCount: tokens.length,
+    });
+  } catch (error) {
+    logPushError('Reminder cancellation', error, {
+      houseId: house.id,
+      reminderId: reminder.id,
+      action,
+      tokenCount: tokens.length,
+    });
+  }
+}
+
 function createHouseCode({ id, name, createdAt }) {
   const namePart = normalize(name)
     .replace(/[^a-z0-9]+/g, '')
@@ -1595,7 +1668,7 @@ app.get('/admin/houses/:houseId', requireAdmin, (req, res) => {
     ...adminHouseSummary(house),
     members: houseMembers(house),
     alerts: houseAlerts(house).map(adminAlertSummary),
-    reminders: houseReminders(house).map(adminReminderSummary),
+    reminders: adminHouseReminders(house).map(adminReminderSummary),
     messages: houseMessages(house, { limit: 30 }).map(adminMessageSummary),
     shortcuts: houseShortcuts(house),
   });
@@ -1648,20 +1721,35 @@ app.patch('/admin/messages/:messageId/moderation', requireAdmin, (req, res) => {
 
 app.get('/admin/reminders', requireAdmin, (req, res) => {
   const query = adminListQuery(req.query);
+  const status = query.status === 'all' ? '' : query.status;
   const reminders = db.reminders
     .map(adminReminderSummary)
     .filter((reminder) =>
       matchesSearch([reminder.title, reminder.note, reminder.houseName, reminder.creatorName, reminder.recurrence], query.search)
+    )
+    .filter((reminder) =>
+      !status ||
+      normalize(reminder.state) === status ||
+      normalize(reminder.recurrence || 'once') === status ||
+      normalize(reminder.deliveryStatus) === status
     )
     .sort((a, b) => dateMs(a.dueAt) - dateMs(b.dueAt));
   res.json(paginate(reminders, query));
 });
 
 app.delete('/admin/reminders/:reminderId', requireAdmin, requireAdminPermission('reminders:delete'), (req, res) => {
-  const index = db.reminders.findIndex((item) => idOf(item.id) === idOf(req.params.reminderId));
-  if (index === -1) return res.status(404).json({ message: 'Reminder not found' });
+  const reminder = db.reminders.find((item) => idOf(item.id) === idOf(req.params.reminderId));
+  if (!reminder) return res.status(404).json({ message: 'Reminder not found' });
 
-  const [reminder] = db.reminders.splice(index, 1);
+  if (!reminder.deletedAt) {
+    reminder.deletedAt = new Date().toISOString();
+    reminder.deletedBy = req.adminActor.id;
+    reminder.stoppedAt = reminder.stoppedAt || reminder.deletedAt;
+    reminder.stoppedBy = reminder.stoppedBy || req.adminActor.id;
+    reminder.deliveryStatus = 'deleted';
+    reminder.updatedAt = reminder.deletedAt;
+  }
+
   recordAdminAction(req, 'reminder.deleted', {
     type: 'reminder',
     id: reminder.id,
@@ -1670,7 +1758,41 @@ app.delete('/admin/reminders/:reminderId', requireAdmin, requireAdminPermission(
   });
   persistDb();
   io.to(reminder.houseId).emit('reminderDeleted', { id: reminder.id, houseId: reminder.houseId });
-  res.json({ ok: true, id: reminder.id });
+  const house = houseForId(reminder.houseId);
+  if (house) {
+    sendReminderCancellationPush({ house, reminder, action: 'deleted' }).catch((error) => {
+      console.warn('Reminder deletion cancellation push failed:', error.message);
+    });
+  }
+  res.json({ ok: true, reminder: adminReminderSummary(reminder) });
+});
+
+app.patch('/admin/reminders/:reminderId/stop', requireAdmin, requireAdminPermission('reminders:stop'), (req, res) => {
+  const reminder = db.reminders.find((item) => idOf(item.id) === idOf(req.params.reminderId));
+  if (!reminder) return res.status(404).json({ message: 'Reminder not found' });
+
+  if (!reminder.stoppedAt) {
+    reminder.stoppedAt = new Date().toISOString();
+    reminder.stoppedBy = req.adminActor.id;
+    reminder.deliveryStatus = 'stopped';
+    reminder.updatedAt = reminder.stoppedAt;
+  }
+
+  recordAdminAction(req, 'reminder.stopped', {
+    type: 'reminder',
+    id: reminder.id,
+    description: `${reminder.title || 'Reminder'} stopped by admin`,
+    tone: 'warning',
+  });
+  persistDb();
+  io.to(reminder.houseId).emit('reminderDeleted', { id: reminder.id, houseId: reminder.houseId });
+  const house = houseForId(reminder.houseId);
+  if (house) {
+    sendReminderCancellationPush({ house, reminder, action: 'stopped' }).catch((error) => {
+      console.warn('Reminder stop cancellation push failed:', error.message);
+    });
+  }
+  res.json({ ok: true, reminder: adminReminderSummary(reminder) });
 });
 
 app.get('/admin/reports', requireAdmin, (req, res) => {
@@ -2437,7 +2559,12 @@ app.post('/houses/:houseId/reminders', requireAuth, requireHouseMember, (req, re
 });
 
 app.put('/houses/:houseId/reminders/:reminderId', requireAuth, requireHouseMember, (req, res) => {
-  const reminder = db.reminders.find((item) => item.id === req.params.reminderId && item.houseId === req.house.id);
+  const reminder = db.reminders.find((item) =>
+    item.id === req.params.reminderId &&
+    item.houseId === req.house.id &&
+    !item.deletedAt &&
+    !item.stoppedAt
+  );
   if (!reminder) return res.status(404).json({ message: 'Reminder not found' });
   const isBirthday = req.body.isBirthday === true;
   const recurrence = normalizeReminderRecurrence(req.body.recurrence);
@@ -2477,12 +2604,25 @@ app.put('/houses/:houseId/reminders/:reminderId', requireAuth, requireHouseMembe
 });
 
 app.delete('/houses/:houseId/reminders/:reminderId', requireAuth, requireHouseMember, (req, res) => {
-  const index = db.reminders.findIndex((item) => item.id === req.params.reminderId && item.houseId === req.house.id);
-  if (index === -1) return res.status(404).json({ message: 'Reminder not found' });
+  const reminder = db.reminders.find((item) =>
+    item.id === req.params.reminderId &&
+    item.houseId === req.house.id &&
+    !item.deletedAt
+  );
+  if (!reminder) return res.status(404).json({ message: 'Reminder not found' });
 
-  const [reminder] = db.reminders.splice(index, 1);
+  const deletedAt = new Date().toISOString();
+  reminder.deletedAt = deletedAt;
+  reminder.deletedBy = req.user.id;
+  reminder.stoppedAt = reminder.stoppedAt || deletedAt;
+  reminder.stoppedBy = reminder.stoppedBy || req.user.id;
+  reminder.deliveryStatus = 'deleted';
+  reminder.updatedAt = deletedAt;
   persistDb();
   io.to(req.house.id).emit('reminderDeleted', { id: reminder.id, houseId: req.house.id });
+  sendReminderCancellationPush({ house: req.house, reminder, action: 'deleted' }).catch((error) => {
+    console.warn('Reminder deletion cancellation push failed:', error.message);
+  });
   res.json({ ok: true, id: reminder.id });
 });
 
