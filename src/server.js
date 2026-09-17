@@ -291,6 +291,16 @@ function signAdmin(admin) {
   );
 }
 
+const superAdminPermissions = ['all', 'reminders:delete'];
+
+function adminPermissions(admin) {
+  const permissions = Array.isArray(admin.permissions) ? admin.permissions : [];
+  if (admin.role === 'super_admin') {
+    return [...new Set([...superAdminPermissions, ...permissions])];
+  }
+  return permissions;
+}
+
 function publicAdmin(admin) {
   return {
     id: admin.id,
@@ -298,7 +308,7 @@ function publicAdmin(admin) {
     email: admin.email || null,
     role: admin.role,
     status: admin.status || 'active',
-    permissions: admin.permissions || [],
+    permissions: adminPermissions(admin),
     createdAt: admin.createdAt || null,
     lastLoginAt: admin.lastLoginAt || null,
   };
@@ -331,7 +341,7 @@ function requireAdmin(req, res, next) {
       id: 'dashboard-super-admin',
       name: 'Super Admin',
       role: 'super_admin',
-      permissions: ['all'],
+      permissions: superAdminPermissions,
       bootstrap: true,
     };
     return next();
@@ -346,7 +356,7 @@ function requireAdmin(req, res, next) {
         id: 'dashboard-super-admin',
         name: 'Super Admin',
         role: 'super_admin',
-        permissions: ['all'],
+        permissions: superAdminPermissions,
         bootstrap: true,
       };
       return next();
@@ -368,6 +378,20 @@ function requireSuperAdmin(req, res, next) {
     return res.status(403).json({ message: 'Super admin permission is required' });
   }
   next();
+}
+
+function adminCan(actor, permission) {
+  const permissions = adminPermissions(actor || {});
+  return actor?.role === 'super_admin' || permissions.includes('all') || permissions.includes(permission);
+}
+
+function requireAdminPermission(permission) {
+  return (req, res, next) => {
+    if (!adminCan(req.adminActor, permission)) {
+      return res.status(403).json({ message: `${permission} permission is required` });
+    }
+    next();
+  };
 }
 
 function requireHouseMember(req, res, next) {
@@ -872,6 +896,44 @@ function recordNotificationFailure({ type, title, body, error, recipientCount = 
     meta: {
       ...meta,
       code: error?.code || null,
+    },
+  });
+}
+
+function recordReminderScheduleLog({ reminder, house, actor, action }) {
+  const title = `Family reminder: ${reminder.title}`;
+  const body = reminder.note || `${actor.name} ${action === 'updated' ? 'updated' : 'added'} a reminder.`;
+  return recordNotificationLog({
+    type: 'reminder',
+    title,
+    body,
+    status: 'success',
+    summary: action === 'updated'
+      ? 'Reminder notification schedule updated'
+      : 'Reminder notification schedule created',
+    recipientCount: house.members.length,
+    tokenCount: 0,
+    successCount: 1,
+    failureCount: 0,
+    deliveryLog: [{
+      userId: actor.id,
+      userName: actor.name || 'Mobile user',
+      tokenPrefix: 'schedule',
+      status: 'success',
+      code: null,
+      message: action === 'updated'
+        ? 'Reminder schedule update accepted by backend'
+        : 'Reminder schedule accepted by backend',
+    }],
+    meta: {
+      houseId: house.id,
+      reminderId: reminder.id,
+      action,
+      dueAt: reminder.dueAt,
+      ringTimes: reminder.ringTimes || [],
+      recurrence: reminder.recurrence || 'once',
+      isBirthday: reminder.isBirthday === true,
+      source: 'backend',
     },
   });
 }
@@ -1432,7 +1494,7 @@ app.post('/admin/auth/token-login', (req, res) => {
     name: 'Super Admin',
     role: 'super_admin',
     status: adminDashboardToken ? 'configured' : 'dev_fallback',
-    permissions: ['all'],
+    permissions: superAdminPermissions,
     bootstrap: true,
   };
   recordAdminAction({ adminActor: admin }, 'admin.auth.token_login', {
@@ -1595,6 +1657,22 @@ app.get('/admin/reminders', requireAdmin, (req, res) => {
   res.json(paginate(reminders, query));
 });
 
+app.delete('/admin/reminders/:reminderId', requireAdmin, requireAdminPermission('reminders:delete'), (req, res) => {
+  const index = db.reminders.findIndex((item) => idOf(item.id) === idOf(req.params.reminderId));
+  if (index === -1) return res.status(404).json({ message: 'Reminder not found' });
+
+  const [reminder] = db.reminders.splice(index, 1);
+  recordAdminAction(req, 'reminder.deleted', {
+    type: 'reminder',
+    id: reminder.id,
+    description: `${reminder.title || 'Reminder'} deleted by admin`,
+    tone: 'warning',
+  });
+  persistDb();
+  io.to(reminder.houseId).emit('reminderDeleted', { id: reminder.id, houseId: reminder.houseId });
+  res.json({ ok: true, id: reminder.id });
+});
+
 app.get('/admin/reports', requireAdmin, (req, res) => {
   const query = adminListQuery(req.query);
   const reports = db.messages
@@ -1724,7 +1802,7 @@ app.get('/admin/admin-users', requireAdmin, (_req, res) => {
     email: null,
     role: 'super_admin',
     status: adminDashboardToken ? 'configured' : 'dev_fallback',
-    permissions: ['all'],
+    permissions: superAdminPermissions,
     createdAt: null,
     lastLoginAt: null,
   };
@@ -1745,7 +1823,7 @@ app.post('/admin/admin-users', requireAdmin, requireSuperAdmin, async (req, res)
   const permissions = Array.isArray(req.body.permissions)
     ? req.body.permissions.map((item) => item.toString()).filter(Boolean)
     : role === 'super_admin'
-      ? ['all']
+      ? superAdminPermissions
       : ['overview:view', 'users:view', 'houses:view', 'needs:view', 'reports:view'];
 
   if (!name || !email || !password) {
@@ -2346,6 +2424,12 @@ app.post('/houses/:houseId/reminders', requireAuth, requireHouseMember, (req, re
   db.reminders.push(reminder);
   persistDb();
   io.to(req.house.id).emit('reminderCreated', reminder);
+  recordReminderScheduleLog({
+    reminder,
+    house: req.house,
+    actor: req.user,
+    action: 'created',
+  });
   sendReminderPush({ house: req.house, reminder, creator: req.user }).catch((error) => {
     console.warn('Reminder push failed:', error.message);
   });
@@ -2383,6 +2467,12 @@ app.put('/houses/:houseId/reminders/:reminderId', requireAuth, requireHouseMembe
   persistDb();
 
   io.to(req.house.id).emit('reminderUpdated', reminder);
+  recordReminderScheduleLog({
+    reminder,
+    house: req.house,
+    actor: req.user,
+    action: 'updated',
+  });
   res.json(reminder);
 });
 
