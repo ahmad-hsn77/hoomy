@@ -1,12 +1,15 @@
 import 'dotenv/config';
+import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import bcrypt from 'bcryptjs';
 import cors from 'cors';
 import express from 'express';
 import { applicationDefault, cert, initializeApp } from 'firebase-admin/app';
 import { getMessaging } from 'firebase-admin/messaging';
 import http from 'node:http';
+import fs from 'node:fs/promises';
 import jwt from 'jsonwebtoken';
 import { MongoClient } from 'mongodb';
+import path from 'node:path';
 import { Server } from 'socket.io';
 import { v4 as uuid } from 'uuid';
 
@@ -20,6 +23,18 @@ app.use(cors({ origin: process.env.CORS_ORIGIN || '*' }));
 app.use(express.json({ limit: '8mb' }));
 
 const jwtSecret = process.env.JWT_SECRET || 'dev-secret';
+const mediaStorageDir = process.env.MEDIA_STORAGE_DIR?.trim() || path.join(process.cwd(), 'media');
+const mediaPublicPath = '/media';
+const mediaStorageDriver = process.env.MEDIA_STORAGE_DRIVER?.trim().toLowerCase() || 'local';
+const r2Config = {
+  accountId: process.env.R2_ACCOUNT_ID?.trim(),
+  bucket: process.env.R2_BUCKET?.trim(),
+  accessKeyId: process.env.R2_ACCESS_KEY_ID?.trim(),
+  secretAccessKey: process.env.R2_SECRET_ACCESS_KEY?.trim(),
+  endpoint: process.env.R2_ENDPOINT?.trim(),
+  publicBaseUrl: process.env.R2_PUBLIC_BASE_URL?.trim()?.replace(/\/+$/, ''),
+};
+let r2Client = null;
 let firebaseApp = null;
 let firebaseMessaging = null;
 
@@ -60,6 +75,17 @@ const firebaseConfigStatus = {
   hasServiceAccountBase64: Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_BASE64),
   hasGoogleCredentialsPath: Boolean(process.env.GOOGLE_APPLICATION_CREDENTIALS),
 };
+
+await fs.mkdir(mediaStorageDir, { recursive: true }).catch((error) => {
+  console.warn('Media storage directory could not be created', {
+    path: mediaStorageDir,
+    message: error.message,
+  });
+});
+app.use(mediaPublicPath, express.static(mediaStorageDir, {
+  immutable: true,
+  maxAge: '30d',
+}));
 
 try {
   const serviceAccount = parseFirebaseServiceAccount();
@@ -454,6 +480,22 @@ function adminHouseReminders(house) {
   return db.reminders.filter((item) => idOf(item.houseId) === idOf(house.id));
 }
 
+function messageForClient(message) {
+  if (!message) return message;
+  const {
+    audioBase64: _audioBase64,
+    imageBase64: _imageBase64,
+    ...safeMessage
+  } = message;
+  return {
+    ...safeMessage,
+    audioUrl: message.audioUrl || null,
+    imageUrl: message.imageUrl || null,
+    audioSizeBytes: message.audioSizeBytes || null,
+    imageSizeBytes: message.imageSizeBytes || null,
+  };
+}
+
 function houseMessages(house, options = {}) {
   const limit = parseMessageLimit(options.limit);
   const before = parseMessageBefore(options.before);
@@ -465,7 +507,8 @@ function houseMessages(house, options = {}) {
     })
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
     .slice(0, limit)
-    .reverse();
+    .reverse()
+    .map(messageForClient);
 }
 
 function parseMessageLimit(value) {
@@ -591,7 +634,7 @@ function adminMessageSummary(message) {
   const sender = userForId(message.senderId);
   const reported = message.reported === true || message.flagged === true;
   return {
-    ...message,
+    ...messageForClient(message),
     houseName: house?.name || 'Unknown house',
     senderName: sender?.name || 'System',
     moderationStatus: message.moderationStatus || (reported ? 'reported' : 'normal'),
@@ -709,10 +752,18 @@ function createHouseMessage({
   replyToMessageId = null,
   audio = false,
   audioBase64 = null,
+  audioUrl = null,
+  audioStoragePath = null,
+  audioSizeBytes = null,
+  audioStorageDriver = null,
   audioMimeType = null,
   audioDurationSeconds = null,
   image = false,
   imageBase64 = null,
+  imageUrl = null,
+  imageStoragePath = null,
+  imageSizeBytes = null,
+  imageStorageDriver = null,
   imageMimeType = null,
   encryptedText = null,
   encryptionNonce = null,
@@ -737,11 +788,19 @@ function createHouseMessage({
     edited: false,
     editedAt: null,
     audio: Boolean(audio),
-    audioBase64: audio ? audioBase64 : null,
+    audioBase64: null,
+    audioUrl: audio ? audioUrl : null,
+    audioStoragePath: audio ? audioStoragePath : null,
+    audioSizeBytes: audio ? audioSizeBytes : null,
+    audioStorageDriver: audio ? audioStorageDriver : null,
     audioMimeType: audio ? audioMimeType : null,
     audioDurationSeconds: audio ? audioDurationSeconds : null,
     image: Boolean(image),
-    imageBase64: image ? imageBase64 : null,
+    imageBase64: null,
+    imageUrl: image ? imageUrl : null,
+    imageStoragePath: image ? imageStoragePath : null,
+    imageSizeBytes: image ? imageSizeBytes : null,
+    imageStorageDriver: image ? imageStorageDriver : null,
     imageMimeType: image ? imageMimeType : null,
     encryptedText,
     encryptionNonce,
@@ -751,7 +810,7 @@ function createHouseMessage({
   };
   db.messages.push(message);
   persistDb();
-  io.to(houseId).emit('messageCreated', message);
+  io.to(houseId).emit('messageCreated', messageForClient(message));
   const house = db.houses.find((item) => item.id === houseId);
   const sender = db.users.find((item) => item.id === senderId);
   if (house && notify) {
@@ -805,6 +864,98 @@ function removeBadPushTokens(tokens, response) {
 
 function idOf(value) {
   return value == null ? '' : value.toString();
+}
+
+function mediaExtensionForMime(mimeType = '') {
+  const normalized = mimeType.toLowerCase();
+  if (normalized.includes('png')) return 'png';
+  if (normalized.includes('webp')) return 'webp';
+  if (normalized.includes('gif')) return 'gif';
+  if (normalized.includes('mp4')) return 'm4a';
+  if (normalized.includes('mpeg')) return 'mp3';
+  if (normalized.includes('ogg')) return 'ogg';
+  if (normalized.includes('wav')) return 'wav';
+  return normalized.startsWith('audio/') ? 'm4a' : 'jpg';
+}
+
+function r2Endpoint() {
+  return r2Config.endpoint || (r2Config.accountId
+    ? `https://${r2Config.accountId}.r2.cloudflarestorage.com`
+    : null);
+}
+
+function getR2Client() {
+  if (r2Client) return r2Client;
+  const endpoint = r2Endpoint();
+  if (!r2Config.bucket || !endpoint || !r2Config.accessKeyId || !r2Config.secretAccessKey) {
+    const error = new Error('R2 media storage is not fully configured');
+    error.statusCode = 500;
+    throw error;
+  }
+
+  r2Client = new S3Client({
+    region: 'auto',
+    endpoint,
+    credentials: {
+      accessKeyId: r2Config.accessKeyId,
+      secretAccessKey: r2Config.secretAccessKey,
+    },
+  });
+  return r2Client;
+}
+
+function publicR2MediaUrl(objectKey) {
+  if (!r2Config.publicBaseUrl) {
+    const error = new Error('R2_PUBLIC_BASE_URL is required so the app can read uploaded media');
+    error.statusCode = 500;
+    throw error;
+  }
+  return `${r2Config.publicBaseUrl}/${objectKey.split('/').map(encodeURIComponent).join('/')}`;
+}
+
+async function storeMessageMedia({ base64, mimeType, houseId, type }) {
+  const cleanBase64 = base64?.toString().replace(/^data:[^;]+;base64,/, '') || '';
+  const buffer = Buffer.from(cleanBase64, 'base64');
+  if (buffer.length === 0) {
+    const error = new Error('Media data is empty');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const extension = mediaExtensionForMime(mimeType);
+  const objectKey = `${idOf(houseId)}/${Date.now()}-${uuid()}.${extension}`;
+  if (mediaStorageDriver === 'r2') {
+    await getR2Client().send(new PutObjectCommand({
+      Bucket: r2Config.bucket,
+      Key: objectKey,
+      Body: buffer,
+      ContentType: mimeType,
+      CacheControl: 'public, max-age=2592000, immutable',
+    }));
+    return {
+      url: publicR2MediaUrl(objectKey),
+      storagePath: objectKey,
+      sizeBytes: buffer.length,
+      mimeType,
+      type,
+      storageDriver: 'r2',
+    };
+  }
+
+  const folder = path.join(mediaStorageDir, idOf(houseId));
+  await fs.mkdir(folder, { recursive: true });
+  const fileName = path.basename(objectKey);
+  const filePath = path.join(folder, fileName);
+  await fs.writeFile(filePath, buffer);
+
+  return {
+    url: `${mediaPublicPath}/${encodeURIComponent(idOf(houseId))}/${encodeURIComponent(fileName)}`,
+    storagePath: path.relative(mediaStorageDir, filePath).replace(/\\/g, '/'),
+    sizeBytes: buffer.length,
+    mimeType,
+    type,
+    storageDriver: 'local',
+  };
 }
 
 function tokensForUsers(users) {
@@ -1510,6 +1661,46 @@ async function sendReminderCancellationPush({ house, reminder, action }) {
   }
 }
 
+async function migrateStoredMessageMedia() {
+  let migrated = 0;
+  for (const message of db.messages) {
+    if (message.image === true && message.imageBase64 && !message.imageUrl) {
+      const media = await storeMessageMedia({
+        base64: message.imageBase64,
+        mimeType: message.imageMimeType || 'image/jpeg',
+        houseId: message.houseId,
+        type: 'image',
+      });
+      message.imageUrl = media.url;
+      message.imageStoragePath = media.storagePath;
+      message.imageSizeBytes = media.sizeBytes;
+      message.imageStorageDriver = media.storageDriver;
+      message.imageBase64 = null;
+      migrated += 1;
+    }
+
+    if (message.audio === true && message.audioBase64 && !message.audioUrl) {
+      const media = await storeMessageMedia({
+        base64: message.audioBase64,
+        mimeType: message.audioMimeType || 'audio/mp4',
+        houseId: message.houseId,
+        type: 'audio',
+      });
+      message.audioUrl = media.url;
+      message.audioStoragePath = media.storagePath;
+      message.audioSizeBytes = media.sizeBytes;
+      message.audioStorageDriver = media.storageDriver;
+      message.audioBase64 = null;
+      migrated += 1;
+    }
+  }
+
+  if (migrated > 0) {
+    await persistDbNow();
+    console.log('Migrated message media out of app state', { migrated });
+  }
+}
+
 function createHouseCode({ id, name, createdAt }) {
   const namePart = normalize(name)
     .replace(/[^a-z0-9]+/g, '')
@@ -1715,7 +1906,7 @@ app.patch('/admin/messages/:messageId/moderation', requireAdmin, (req, res) => {
     tone: moderationStatus === 'hidden' ? 'danger' : 'info',
   });
   persistDb();
-  io.to(message.houseId).emit('messageUpdated', message);
+  io.to(message.houseId).emit('messageUpdated', messageForClient(message));
   res.json(adminMessageSummary(message));
 });
 
@@ -2626,7 +2817,7 @@ app.delete('/houses/:houseId/reminders/:reminderId', requireAuth, requireHouseMe
   res.json({ ok: true, id: reminder.id });
 });
 
-app.post('/houses/:houseId/messages', requireAuth, requireHouseMember, (req, res) => {
+app.post('/houses/:houseId/messages', requireAuth, requireHouseMember, async (req, res) => {
   const replyToMessageId = req.body.replyToMessageId ? req.body.replyToMessageId.toString() : null;
   if (replyToMessageId) {
     const replyTo = db.messages.find((item) => item.houseId === req.house.id && item.id === replyToMessageId);
@@ -2659,24 +2850,51 @@ app.post('/houses/:houseId/messages', requireAuth, requireHouseMember, (req, res
     return res.status(400).json({ message: 'Encrypted message payload is incomplete' });
   }
 
-  const message = createHouseMessage({
-    houseId: req.house.id,
-    senderId: req.user.id,
-    text: encryptedPayloadPresent ? 'Encrypted message' : audio ? text || 'Voice message' : image ? text || 'Photo' : text,
-    replyToMessageId,
-    audio,
-    audioBase64,
-    audioMimeType,
-    audioDurationSeconds,
-    image,
-    imageBase64,
-    imageMimeType,
-    encryptedText,
-    encryptionNonce,
-    encryptionAlgorithm,
-    encryptionVersion,
-  });
-  res.status(201).json(message);
+  try {
+    const audioMedia = audio
+      ? await storeMessageMedia({
+          base64: audioBase64,
+          mimeType: audioMimeType,
+          houseId: req.house.id,
+          type: 'audio',
+        })
+      : null;
+    const imageMedia = image
+      ? await storeMessageMedia({
+          base64: imageBase64,
+          mimeType: imageMimeType,
+          houseId: req.house.id,
+          type: 'image',
+        })
+      : null;
+
+    const message = createHouseMessage({
+      houseId: req.house.id,
+      senderId: req.user.id,
+      text: encryptedPayloadPresent ? 'Encrypted message' : audio ? text || 'Voice message' : image ? text || 'Photo' : text,
+      replyToMessageId,
+      audio,
+      audioUrl: audioMedia?.url || null,
+      audioStoragePath: audioMedia?.storagePath || null,
+      audioSizeBytes: audioMedia?.sizeBytes || null,
+      audioStorageDriver: audioMedia?.storageDriver || null,
+      audioMimeType,
+      audioDurationSeconds,
+      image,
+      imageUrl: imageMedia?.url || null,
+      imageStoragePath: imageMedia?.storagePath || null,
+      imageSizeBytes: imageMedia?.sizeBytes || null,
+      imageStorageDriver: imageMedia?.storageDriver || null,
+      imageMimeType,
+      encryptedText,
+      encryptionNonce,
+      encryptionAlgorithm,
+      encryptionVersion,
+    });
+    res.status(201).json(messageForClient(message));
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ message: error.message || 'Could not store message media' });
+  }
 });
 
 app.put('/houses/:houseId/messages/:messageId', requireAuth, requireHouseMember, (req, res) => {
@@ -2708,8 +2926,8 @@ app.put('/houses/:houseId/messages/:messageId', requireAuth, requireHouseMember,
   message.edited = true;
   message.editedAt = new Date().toISOString();
   persistDb();
-  io.to(req.house.id).emit('messageUpdated', message);
-  res.json(message);
+  io.to(req.house.id).emit('messageUpdated', messageForClient(message));
+  res.json(messageForClient(message));
 });
 
 app.post('/houses/:houseId/messages/:messageId/received', requireAuth, requireHouseMember, (req, res) => {
@@ -2717,8 +2935,8 @@ app.post('/houses/:houseId/messages/:messageId/received', requireAuth, requireHo
   if (!message) return res.status(404).json({ message: 'Message not found' });
   markMessageReceived(message, req.user.id);
   persistDb();
-  io.to(req.house.id).emit('messageUpdated', message);
-  res.json(message);
+  io.to(req.house.id).emit('messageUpdated', messageForClient(message));
+  res.json(messageForClient(message));
 });
 
 app.put('/houses/:houseId/messages/:messageId/reaction', requireAuth, requireHouseMember, (req, res) => {
@@ -2732,8 +2950,8 @@ app.put('/houses/:houseId/messages/:messageId/reaction', requireAuth, requireHou
 
   setMessageReaction(message, req.user.id, emoji);
   persistDb();
-  io.to(req.house.id).emit('messageUpdated', message);
-  res.json(message);
+  io.to(req.house.id).emit('messageUpdated', messageForClient(message));
+  res.json(messageForClient(message));
 });
 
 app.post('/houses/:houseId/messages/seen', requireAuth, requireHouseMember, (req, res) => {
@@ -2747,9 +2965,9 @@ app.post('/houses/:houseId/messages/seen', requireAuth, requireHouseMember, (req
   }
   if (updated.length > 0) {
     persistDb();
-    for (const message of updated) io.to(req.house.id).emit('messageUpdated', message);
+    for (const message of updated) io.to(req.house.id).emit('messageUpdated', messageForClient(message));
   }
-  res.json({ ok: true, messages: updated });
+  res.json({ ok: true, messages: updated.map(messageForClient) });
 });
 
 app.post('/houses/:houseId/shortcuts', requireAuth, requireHouseMember, (req, res) => {
@@ -2812,6 +3030,11 @@ io.on('connection', (socket) => {
 const port = Number(process.env.PORT || 8080);
 await connectDataStore().catch((error) => {
   console.warn('MongoDB connection failed. Data will be stored in memory only.', {
+    message: error.message,
+  });
+});
+await migrateStoredMessageMedia().catch((error) => {
+  console.warn('Stored message media migration failed', {
     message: error.message,
   });
 });
