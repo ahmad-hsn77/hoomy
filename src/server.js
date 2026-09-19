@@ -234,8 +234,8 @@ const defaultNotificationPreferences = {
 
 const notificationChannels = {
   emergencyAlerts: 'hoomy_emergency_alerts_alarm_v2',
-  needAlerts: 'hoomy_need_alerts',
-  chatMessages: 'hoomy_chat_messages_chime_v2',
+  needAlerts: 'hoomy_need_alerts_high_v2',
+  chatMessages: 'hoomy_chat_messages_high_v3',
   reminders: 'hoomy_reminders_alarm_v1',
 };
 const allowedMessageReactions = ['❤️', '😂', '👍', '🙏', '😮', '😢'];
