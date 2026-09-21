@@ -1191,25 +1191,6 @@ function pushData(values) {
   );
 }
 
-function chatPushLine(message) {
-  const sender = db.users.find((item) => idOf(item.id) === idOf(message.senderId));
-  const senderName = sender?.name || 'Family';
-  const body = message.audio
-    ? 'Voice message'
-    : message.image
-      ? 'Photo'
-      : message.text || 'New family message';
-  return message.system ? body : `${senderName}: ${body}`;
-}
-
-function latestChatPushLines(houseId) {
-  return db.messages
-    .filter((item) => idOf(item.houseId) === idOf(houseId))
-    .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
-    .slice(-3)
-    .map(chatPushLine);
-}
-
 function normalizeRingTimes(value, dueAt) {
   const values = Array.isArray(value) ? value : [];
   const normalized = new Set();
@@ -1286,12 +1267,9 @@ async function sendMessagePush({ house, message, sender }) {
     return;
   }
 
-  const visibleLines = latestChatPushLines(house.id);
-  const notificationBody = visibleLines.length > 0 ? visibleLines.join('\n') : body;
   try {
     const response = await firebaseMessaging.sendEachForMulticast({
       tokens,
-      notification: { title: 'Family chat', body: notificationBody },
       data: pushData({
         type: 'messageCreated',
         messageId: message.id,
@@ -1300,7 +1278,12 @@ async function sendMessagePush({ house, message, sender }) {
         title,
         body,
         system: message.system ? 'true' : 'false',
-        visibleLines: JSON.stringify(visibleLines),
+        audio: message.audio ? 'true' : 'false',
+        image: message.image ? 'true' : 'false',
+        encryptedText: message.encryptedText,
+        encryptionNonce: message.encryptionNonce,
+        encryptionAlgorithm: message.encryptionAlgorithm,
+        encryptionVersion: message.encryptionVersion,
       }),
       android: {
         priority: 'high',
@@ -1316,14 +1299,13 @@ async function sendMessagePush({ house, message, sender }) {
       },
       apns: {
         headers: {
-          'apns-priority': '10',
-          'apns-push-type': 'alert',
+          'apns-priority': '5',
+          'apns-push-type': 'background',
           'apns-collapse-id': 'hoomy-family-chat',
         },
         payload: {
           aps: {
-            alert: { title: 'Family chat', body: notificationBody },
-            sound: 'message_chime.wav',
+            'content-available': 1,
             'thread-id': 'com.idea.hoomy.hoomy.FAMILY_CHAT',
           },
         },
