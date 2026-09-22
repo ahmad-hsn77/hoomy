@@ -156,16 +156,39 @@ const db = {
 };
 
 const dataStoreConfig = {
+  driver: process.env.DATA_STORE_DRIVER?.trim() || 'mongo_document',
   uri: process.env.MONGODB_URI?.trim(),
   databaseName: process.env.MONGODB_DB?.trim() || 'hoomy',
   collectionName: process.env.MONGODB_COLLECTION?.trim() || 'app_state',
   documentId: process.env.MONGODB_DOCUMENT_ID?.trim() || 'main',
+  mysqlUrl: process.env.MYSQL_URL?.trim() || process.env.DATABASE_URL?.trim(),
 };
 let mongoClient = null;
 let dataCollection = null;
+let mongoDatabase = null;
+let mysqlPool = null;
 let dataStoreReady = false;
 let persistTimer = null;
 let persistChain = Promise.resolve();
+const arrayDataKeys = Object.keys(db).filter((key) => Array.isArray(db[key]));
+const objectDataKeys = Object.keys(db).filter((key) => !Array.isArray(db[key]));
+
+function recordIdFor(key, item, index) {
+  return idOf(item?.id) || idOf(item?._id) || `${key}-${index}`;
+}
+
+function storedRecord(item, key, index) {
+  return {
+    ...item,
+    _id: recordIdFor(key, item, index),
+    __order: index,
+  };
+}
+
+function publicStoredRecord(item) {
+  const { _id: _storedId, __order: _order, ...record } = item;
+  return record;
+}
 
 function loadDbState(state = {}) {
   for (const key of Object.keys(db)) {
@@ -189,16 +212,26 @@ function dbSnapshot() {
 }
 
 async function connectDataStore() {
+  if (dataStoreConfig.driver === 'mysql') {
+    await connectMysqlDataStore();
+    return;
+  }
+
   if (!dataStoreConfig.uri) {
     console.warn('MongoDB is not configured. Data will be stored in memory only.');
     return;
   }
-
   mongoClient = new MongoClient(dataStoreConfig.uri);
   await mongoClient.connect();
-  dataCollection = mongoClient
-    .db(dataStoreConfig.databaseName)
-    .collection(dataStoreConfig.collectionName);
+  mongoDatabase = mongoClient.db(dataStoreConfig.databaseName);
+
+  if (dataStoreConfig.driver === 'mongo_collections') {
+    await loadMongoCollectionsDataStore();
+    dataStoreReady = true;
+    return;
+  }
+
+  dataCollection = mongoDatabase.collection(dataStoreConfig.collectionName);
 
   const saved = await dataCollection.findOne({ _id: dataStoreConfig.documentId });
   if (saved?.state) {
@@ -219,8 +252,101 @@ async function connectDataStore() {
   dataStoreReady = true;
 }
 
+async function loadMongoCollectionsDataStore() {
+  for (const key of arrayDataKeys) {
+    const records = await mongoDatabase
+      .collection(key)
+      .find({})
+      .sort({ __order: 1, createdAt: 1 })
+      .toArray();
+    db[key] = records.map(publicStoredRecord);
+  }
+  for (const key of objectDataKeys) {
+    const saved = await mongoDatabase.collection('app_meta').findOne({ _id: key });
+    if (saved?.value && typeof saved.value === 'object') {
+      db[key] = { ...db[key], ...saved.value };
+    }
+  }
+  const totalRecords = arrayDataKeys.reduce((sum, key) => sum + db[key].length, 0);
+  if (totalRecords === 0) {
+    const legacy = await mongoDatabase
+      .collection(dataStoreConfig.collectionName)
+      .findOne({ _id: dataStoreConfig.documentId });
+    if (legacy?.state) {
+      loadDbState(legacy.state);
+      await persistDbNow();
+      console.log('Migrated legacy app_state document into MongoDB collections');
+    }
+  }
+  console.log('Loaded Hoomy data from MongoDB collections', {
+    database: dataStoreConfig.databaseName,
+    users: db.users.length,
+    houses: db.houses.length,
+    messages: db.messages.length,
+  });
+}
+
+async function connectMysqlDataStore() {
+  if (!dataStoreConfig.mysqlUrl) {
+    console.warn('MySQL is not configured. Data will be stored in memory only.');
+    return;
+  }
+  const mysql = await import('mysql2/promise');
+  mysqlPool = mysql.createPool(dataStoreConfig.mysqlUrl);
+  await ensureMysqlSchema();
+  await loadMysqlDataStore();
+  dataStoreReady = true;
+}
+
+async function ensureMysqlSchema() {
+  const connection = await mysqlPool.getConnection();
+  try {
+    for (const key of arrayDataKeys) {
+      await connection.execute(`
+        CREATE TABLE IF NOT EXISTS \`${key}\` (
+          id VARCHAR(191) NOT NULL PRIMARY KEY,
+          sort_order INT NOT NULL DEFAULT 0,
+          data JSON NOT NULL,
+          updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      `);
+    }
+    await connection.execute(`
+      CREATE TABLE IF NOT EXISTS app_meta (
+        id VARCHAR(191) NOT NULL PRIMARY KEY,
+        data JSON NOT NULL,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+  } finally {
+    connection.release();
+  }
+}
+
+async function loadMysqlDataStore() {
+  for (const key of arrayDataKeys) {
+    const [rows] = await mysqlPool.query(
+      `SELECT data FROM \`${key}\` ORDER BY sort_order ASC`
+    );
+    db[key] = rows.map((row) =>
+      typeof row.data === 'string' ? JSON.parse(row.data) : row.data
+    );
+  }
+  const [metaRows] = await mysqlPool.query('SELECT id, data FROM app_meta');
+  for (const row of metaRows) {
+    if (!objectDataKeys.includes(row.id)) continue;
+    const value = typeof row.data === 'string' ? JSON.parse(row.data) : row.data;
+    db[row.id] = { ...db[row.id], ...value };
+  }
+  console.log('Loaded Hoomy data from MySQL tables', {
+    users: db.users.length,
+    houses: db.houses.length,
+    messages: db.messages.length,
+  });
+}
+
 function persistDb() {
-  if (!dataCollection) return;
+  if (!dataCollection && !mongoDatabase && !mysqlPool) return;
   clearTimeout(persistTimer);
   persistTimer = setTimeout(() => {
     persistDbNow().catch((error) => {
@@ -232,8 +358,22 @@ function persistDb() {
 }
 
 async function persistDbNow() {
-  if (!dataCollection) return;
+  if (!dataCollection && !mongoDatabase && !mysqlPool) return;
   const state = dbSnapshot();
+  if (dataStoreConfig.driver === 'mongo_collections') {
+    persistChain = persistChain.catch(() => {}).then(() =>
+      persistMongoCollectionsSnapshot(state)
+    );
+    await persistChain;
+    return;
+  }
+  if (dataStoreConfig.driver === 'mysql') {
+    persistChain = persistChain.catch(() => {}).then(() =>
+      persistMysqlSnapshot(state)
+    );
+    await persistChain;
+    return;
+  }
   persistChain = persistChain.catch(() => {}).then(() =>
     dataCollection.updateOne(
       { _id: dataStoreConfig.documentId },
@@ -250,6 +390,55 @@ async function persistDbNow() {
     )
   );
   await persistChain;
+}
+
+async function persistMongoCollectionsSnapshot(state) {
+  for (const key of arrayDataKeys) {
+    const collection = mongoDatabase.collection(key);
+    await collection.deleteMany({});
+    const records = (state[key] || []).map((item, index) =>
+      storedRecord(item, key, index)
+    );
+    if (records.length > 0) await collection.insertMany(records);
+  }
+  const metaCollection = mongoDatabase.collection('app_meta');
+  for (const key of objectDataKeys) {
+    await metaCollection.updateOne(
+      { _id: key },
+      { $set: { value: state[key], updatedAt: new Date() } },
+      { upsert: true }
+    );
+  }
+}
+
+async function persistMysqlSnapshot(state) {
+  const connection = await mysqlPool.getConnection();
+  try {
+    await connection.beginTransaction();
+    for (const key of arrayDataKeys) {
+      await connection.query(`DELETE FROM \`${key}\``);
+      const records = state[key] || [];
+      for (let index = 0; index < records.length; index += 1) {
+        const item = records[index];
+        await connection.execute(
+          `INSERT INTO \`${key}\` (id, sort_order, data) VALUES (?, ?, ?)`,
+          [recordIdFor(key, item, index), index, JSON.stringify(item)]
+        );
+      }
+    }
+    for (const key of objectDataKeys) {
+      await connection.execute(
+        'REPLACE INTO app_meta (id, data) VALUES (?, ?)',
+        [key, JSON.stringify(state[key])]
+      );
+    }
+    await connection.commit();
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
 }
 
 const defaultNotificationPreferences = {
@@ -1288,14 +1477,6 @@ async function sendMessagePush({ house, message, sender }) {
       android: {
         priority: 'high',
         collapseKey: 'hoomy-family-chat',
-        notification: {
-          channelId: notificationChannels.chatMessages,
-          icon: 'ic_notification_house',
-          sound: 'message_chime',
-          priority: 'high',
-          visibility: 'public',
-          tag: 'hoomy-family-chat',
-        },
       },
       apns: {
         headers: {
