@@ -1,5 +1,6 @@
 import 'dotenv/config';
-import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import bcrypt from 'bcryptjs';
 import cors from 'cors';
 import express from 'express';
@@ -1106,6 +1107,72 @@ function publicR2MediaUrl(objectKey) {
   return `${r2Config.publicBaseUrl}/${objectKey.split('/').map(encodeURIComponent).join('/')}`;
 }
 
+function createMediaObjectKey({ houseId, type, mimeType }) {
+  const extension = mediaExtensionForMime(mimeType);
+  return `${idOf(houseId)}/${Date.now()}-${uuid()}.${extension}`;
+}
+
+function requireR2MediaStorage() {
+  if (mediaStorageDriver !== 'r2') {
+    const error = new Error('Direct media upload requires MEDIA_STORAGE_DRIVER=r2');
+    error.statusCode = 500;
+    throw error;
+  }
+  getR2Client();
+}
+
+function sanitizeUploadedMedia({ url, storagePath, sizeBytes, mimeType, type, houseId }) {
+  const cleanStoragePath = storagePath?.toString().trim() || '';
+  const cleanUrl = url?.toString().trim() || '';
+  const expectedBaseUrl = r2Config.publicBaseUrl?.replace(/\/+$/, '');
+  const cleanMimeType = mimeType?.toString().trim() || (type === 'audio' ? 'audio/mp4' : 'image/jpeg');
+  const parsedSize = Number(sizeBytes);
+
+  if (!cleanStoragePath || !cleanStoragePath.startsWith(`${idOf(houseId)}/`)) {
+    const error = new Error('Uploaded media path is invalid');
+    error.statusCode = 400;
+    throw error;
+  }
+  if (!expectedBaseUrl || !cleanUrl.startsWith(`${expectedBaseUrl}/`)) {
+    const error = new Error('Uploaded media URL is invalid');
+    error.statusCode = 400;
+    throw error;
+  }
+  if (!Number.isFinite(parsedSize) || parsedSize <= 0) {
+    const error = new Error('Uploaded media size is invalid');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  return {
+    url: cleanUrl,
+    storagePath: cleanStoragePath,
+    sizeBytes: Math.round(parsedSize),
+    mimeType: cleanMimeType,
+    type,
+    storageDriver: 'r2',
+  };
+}
+
+async function validateUploadedR2Media(media) {
+  requireR2MediaStorage();
+  const response = await getR2Client().send(new HeadObjectCommand({
+    Bucket: r2Config.bucket,
+    Key: media.storagePath,
+  }));
+  const remoteSize = Number(response.ContentLength);
+  if (Number.isFinite(remoteSize) && remoteSize > 0 && remoteSize !== media.sizeBytes) {
+    const error = new Error('Uploaded media size does not match');
+    error.statusCode = 400;
+    throw error;
+  }
+  return {
+    ...media,
+    sizeBytes: Number.isFinite(remoteSize) && remoteSize > 0 ? remoteSize : media.sizeBytes,
+    mimeType: response.ContentType || media.mimeType,
+  };
+}
+
 async function storeMessageMedia({ base64, mimeType, houseId, type }) {
   const cleanBase64 = base64?.toString().replace(/^data:[^;]+;base64,/, '') || '';
   const buffer = Buffer.from(cleanBase64, 'base64');
@@ -1115,8 +1182,7 @@ async function storeMessageMedia({ base64, mimeType, houseId, type }) {
     throw error;
   }
 
-  const extension = mediaExtensionForMime(mimeType);
-  const objectKey = `${idOf(houseId)}/${Date.now()}-${uuid()}.${extension}`;
+  const objectKey = createMediaObjectKey({ houseId, type, mimeType });
   if (mediaStorageDriver === 'r2') {
     await getR2Client().send(new PutObjectCommand({
       Bucket: r2Config.bucket,
@@ -2984,6 +3050,52 @@ app.delete('/houses/:houseId/reminders/:reminderId', requireAuth, requireHouseMe
   res.json({ ok: true, id: reminder.id });
 });
 
+app.post('/houses/:houseId/messages/media-upload', requireAuth, requireHouseMember, async (req, res) => {
+  const type = req.body.type?.toString();
+  const mimeType = req.body.mimeType?.toString() || (type === 'audio' ? 'audio/mp4' : 'image/jpeg');
+  const sizeBytes = Number(req.body.sizeBytes);
+
+  if (!['audio', 'image'].includes(type)) {
+    return res.status(400).json({ message: 'Media type is invalid' });
+  }
+  if (!Number.isFinite(sizeBytes) || sizeBytes <= 0) {
+    return res.status(400).json({ message: 'Media size is invalid' });
+  }
+
+  try {
+    requireR2MediaStorage();
+    const objectKey = createMediaObjectKey({
+      houseId: req.house.id,
+      type,
+      mimeType,
+    });
+    const command = new PutObjectCommand({
+      Bucket: r2Config.bucket,
+      Key: objectKey,
+      ContentType: mimeType,
+      CacheControl: 'public, max-age=2592000, immutable',
+    });
+    const uploadUrl = await getSignedUrl(getR2Client(), command, { expiresIn: 300 });
+    res.json({
+      uploadUrl,
+      method: 'PUT',
+      headers: {
+        'Content-Type': mimeType,
+        'Cache-Control': 'public, max-age=2592000, immutable',
+      },
+      url: publicR2MediaUrl(objectKey),
+      storagePath: objectKey,
+      storageDriver: 'r2',
+      sizeBytes: Math.round(sizeBytes),
+      mimeType,
+      type,
+      expiresInSeconds: 300,
+    });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ message: error.message || 'Could not create media upload URL' });
+  }
+});
+
 app.post('/houses/:houseId/messages', requireAuth, requireHouseMember, async (req, res) => {
   const replyToMessageId = req.body.replyToMessageId ? req.body.replyToMessageId.toString() : null;
   if (replyToMessageId) {
@@ -3002,14 +3114,22 @@ app.post('/houses/:houseId/messages', requireAuth, requireHouseMember, async (re
   const encryptedPayloadPresent = Boolean(encryptedText || encryptionNonce || encryptionAlgorithm || encryptionVersion);
   const audioBase64 = req.body.audioBase64?.toString() || null;
   const audioMimeType = req.body.audioMimeType?.toString() || 'audio/mp4';
+  const audioUrl = req.body.audioUrl?.toString() || null;
+  const audioStoragePath = req.body.audioStoragePath?.toString() || null;
+  const audioSizeBytes = Number(req.body.audioSizeBytes);
   const audioDurationSeconds = Number.isFinite(Number(req.body.audioDurationSeconds))
     ? Math.max(0, Math.round(Number(req.body.audioDurationSeconds)))
     : null;
   const imageBase64 = req.body.imageBase64?.toString() || null;
   const imageMimeType = req.body.imageMimeType?.toString() || 'image/jpeg';
+  const imageUrl = req.body.imageUrl?.toString() || null;
+  const imageStoragePath = req.body.imageStoragePath?.toString() || null;
+  const imageSizeBytes = Number(req.body.imageSizeBytes);
+  const audioUploaded = Boolean(audioUrl || audioStoragePath);
+  const imageUploaded = Boolean(imageUrl || imageStoragePath);
 
-  if (audio && !audioBase64) return res.status(400).json({ message: 'Audio data is required' });
-  if (image && !imageBase64) return res.status(400).json({ message: 'Image data is required' });
+  if (audio && !audioBase64 && !audioUploaded) return res.status(400).json({ message: 'Audio data is required' });
+  if (image && !imageBase64 && !imageUploaded) return res.status(400).json({ message: 'Image data is required' });
   if (!audio && !image && !text) return res.status(400).json({ message: 'Message text is required' });
   if (encryptedPayloadPresent && audio) return res.status(400).json({ message: 'Voice messages cannot include encrypted text' });
   if (encryptedPayloadPresent && image) return res.status(400).json({ message: 'Image messages cannot include encrypted text' });
@@ -3019,20 +3139,38 @@ app.post('/houses/:houseId/messages', requireAuth, requireHouseMember, async (re
 
   try {
     const audioMedia = audio
-      ? await storeMessageMedia({
-          base64: audioBase64,
-          mimeType: audioMimeType,
-          houseId: req.house.id,
-          type: 'audio',
-        })
+      ? audioUploaded
+        ? await validateUploadedR2Media(sanitizeUploadedMedia({
+            url: audioUrl,
+            storagePath: audioStoragePath,
+            sizeBytes: audioSizeBytes,
+            mimeType: audioMimeType,
+            houseId: req.house.id,
+            type: 'audio',
+          }))
+        : await storeMessageMedia({
+            base64: audioBase64,
+            mimeType: audioMimeType,
+            houseId: req.house.id,
+            type: 'audio',
+          })
       : null;
     const imageMedia = image
-      ? await storeMessageMedia({
-          base64: imageBase64,
-          mimeType: imageMimeType,
-          houseId: req.house.id,
-          type: 'image',
-        })
+      ? imageUploaded
+        ? await validateUploadedR2Media(sanitizeUploadedMedia({
+            url: imageUrl,
+            storagePath: imageStoragePath,
+            sizeBytes: imageSizeBytes,
+            mimeType: imageMimeType,
+            houseId: req.house.id,
+            type: 'image',
+          }))
+        : await storeMessageMedia({
+            base64: imageBase64,
+            mimeType: imageMimeType,
+            houseId: req.house.id,
+            type: 'image',
+          })
       : null;
 
     const message = createHouseMessage({
