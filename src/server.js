@@ -136,6 +136,10 @@ if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
 }
 */
 
+const defaultAppLatestVersion = process.env.APP_LATEST_VERSION?.trim() || '0.1.92';
+const defaultAppMinimumSupportedVersion = process.env.APP_MIN_SUPPORTED_VERSION?.trim() || '';
+const legacyDefaultAppLatestVersion = '0.1.4';
+
 const db = {
   users: [],
   houses: [],
@@ -148,8 +152,8 @@ const db = {
   notificationLogs: [],
   adminUsers: [],
   appVersionPolicy: {
-    latestVersion: process.env.APP_LATEST_VERSION?.trim() || '0.1.4',
-    minimumSupportedVersion: process.env.APP_MIN_SUPPORTED_VERSION?.trim() || '',
+    latestVersion: defaultAppLatestVersion,
+    minimumSupportedVersion: defaultAppMinimumSupportedVersion,
     updateUrl: process.env.APP_UPDATE_URL?.trim() || '',
     releaseNotes: process.env.APP_UPDATE_NOTES?.trim() || '',
     forceUpdate: process.env.APP_FORCE_UPDATE === 'true',
@@ -204,6 +208,26 @@ function loadDbState(state = {}) {
       Object.assign(db[key], state[key]);
     }
   }
+  normalizeAppVersionPolicy();
+}
+
+function normalizeAppVersionPolicy() {
+  if (!db.appVersionPolicy.latestVersion) {
+    db.appVersionPolicy.latestVersion = defaultAppLatestVersion;
+  }
+  if (
+    !process.env.APP_LATEST_VERSION &&
+    db.appVersionPolicy.latestVersion === legacyDefaultAppLatestVersion &&
+    !db.appVersionPolicy.updatedAt
+  ) {
+    db.appVersionPolicy.latestVersion = defaultAppLatestVersion;
+  }
+  if (db.appVersionPolicy.minimumSupportedVersion == null) {
+    db.appVersionPolicy.minimumSupportedVersion = defaultAppMinimumSupportedVersion;
+  }
+  if (db.appVersionPolicy.updateUrl == null) db.appVersionPolicy.updateUrl = '';
+  if (db.appVersionPolicy.releaseNotes == null) db.appVersionPolicy.releaseNotes = '';
+  db.appVersionPolicy.forceUpdate = db.appVersionPolicy.forceUpdate === true;
 }
 
 function dbSnapshot() {
