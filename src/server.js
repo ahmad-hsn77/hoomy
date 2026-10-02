@@ -794,6 +794,25 @@ function userForId(userId) {
   return db.users.find((user) => idOf(user.id) === idOf(userId));
 }
 
+function updateUserClientInfo(user, { appVersion, platform } = {}) {
+  if (!user) return false;
+  let changed = false;
+  const cleanAppVersion = appVersion?.toString().trim();
+  const cleanPlatform = platform?.toString().trim();
+  if (cleanAppVersion && user.lastAppVersion !== cleanAppVersion) {
+    user.lastAppVersion = cleanAppVersion;
+    changed = true;
+  }
+  if (cleanPlatform && user.lastPlatform !== cleanPlatform) {
+    user.lastPlatform = cleanPlatform;
+    changed = true;
+  }
+  const now = new Date().toISOString();
+  user.lastActiveAt = now;
+  user.updatedAt = now;
+  return true;
+}
+
 function adminUserSummary(user) {
   const memberships = db.houses
     .flatMap((house) =>
@@ -2523,7 +2542,21 @@ app.post('/auth/reset-password', async (req, res) => {
 });
 
 app.get('/auth/me', requireAuth, (req, res) => {
+  const updatedClientInfo = updateUserClientInfo(req.user, {
+    appVersion: req.query.appVersion,
+    platform: req.query.platform,
+  });
+  if (updatedClientInfo) persistDb();
   res.json(authState(req.user));
+});
+
+app.put('/users/me/client-info', requireAuth, (req, res) => {
+  updateUserClientInfo(req.user, {
+    appVersion: req.body.appVersion,
+    platform: req.body.platform,
+  });
+  persistDb();
+  res.json({ ok: true, user: publicUser(req.user) });
 });
 
 app.put('/users/me/profile', requireAuth, (req, res) => {
