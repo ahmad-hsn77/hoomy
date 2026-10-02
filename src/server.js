@@ -136,7 +136,7 @@ if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
 }
 */
 
-const defaultAppLatestVersion = process.env.APP_LATEST_VERSION?.trim() || '0.1.92';
+const defaultAppLatestVersion = process.env.APP_LATEST_VERSION?.trim() || '0.1.93';
 const defaultAppMinimumSupportedVersion = process.env.APP_MIN_SUPPORTED_VERSION?.trim() || '';
 const legacyDefaultAppLatestVersion = '0.1.4';
 
@@ -303,6 +303,7 @@ async function loadMongoCollectionsDataStore() {
       console.log('Migrated legacy app_state document into MongoDB collections');
     }
   }
+  normalizeAppVersionPolicy();
   console.log('Loaded Hoomy data from MongoDB collections', {
     database: dataStoreConfig.databaseName,
     users: db.users.length,
@@ -363,6 +364,7 @@ async function loadMysqlDataStore() {
     const value = typeof row.data === 'string' ? JSON.parse(row.data) : row.data;
     db[row.id] = { ...db[row.id], ...value };
   }
+  normalizeAppVersionPolicy();
   console.log('Loaded Hoomy data from MySQL tables', {
     users: db.users.length,
     houses: db.houses.length,
@@ -483,8 +485,6 @@ const allowedMessageReactions = ['❤️', '😂', '👍', '🙏', '😮', '😢
 const adminDashboardToken = process.env.ADMIN_DASHBOARD_TOKEN?.trim();
 const fallbackAdminDashboardToken =
   process.env.NODE_ENV === 'production' ? null : 'dev-admin-token';
-const appVersionPolicy = db.appVersionPolicy;
-
 function normalize(value) {
   return value?.toString().trim().toLowerCase() || '';
 }
@@ -915,8 +915,8 @@ function adminHealth() {
     databaseConfigured: Boolean(dataStoreConfig.uri),
     databaseReady: dataStoreReady,
     firebaseAdminConfigured: Boolean(firebaseMessaging),
-    latestVersion: appVersionPolicy.latestVersion,
-    minimumSupportedVersion: appVersionPolicy.minimumSupportedVersion,
+    latestVersion: db.appVersionPolicy.latestVersion,
+    minimumSupportedVersion: db.appVersionPolicy.minimumSupportedVersion,
   };
 }
 
@@ -2001,13 +2001,14 @@ app.get('/health', (_req, res) => {
 
 app.get('/app/update', (req, res) => {
   const currentVersion = req.query.currentVersion?.toString() || '';
+  const policy = db.appVersionPolicy;
 
   res.json({
-    latestVersion: appVersionPolicy.latestVersion,
-    minimumSupportedVersion: appVersionPolicy.minimumSupportedVersion,
-    updateUrl: appVersionPolicy.updateUrl,
-    releaseNotes: appVersionPolicy.releaseNotes,
-    forceUpdate: appVersionPolicy.forceUpdate,
+    latestVersion: policy.latestVersion,
+    minimumSupportedVersion: policy.minimumSupportedVersion,
+    updateUrl: policy.updateUrl,
+    releaseNotes: policy.releaseNotes,
+    forceUpdate: policy.forceUpdate,
     currentVersion,
   });
 });
@@ -2343,10 +2344,11 @@ app.post('/admin/notifications/send', requireAdmin, async (req, res) => {
 });
 
 app.get('/admin/versions', requireAdmin, (_req, res) => {
-  res.json(appVersionPolicy);
+  res.json(db.appVersionPolicy);
 });
 
 app.put('/admin/versions', requireAdmin, requireSuperAdmin, (req, res) => {
+  const policy = db.appVersionPolicy;
   const latestVersion = req.body.latestVersion?.toString().trim();
   const minimumSupportedVersion = req.body.minimumSupportedVersion?.toString().trim() || '';
   const updateUrl = req.body.updateUrl?.toString().trim() || '';
@@ -2364,21 +2366,21 @@ app.put('/admin/versions', requireAdmin, requireSuperAdmin, (req, res) => {
       return res.status(400).json({ message: 'Update URL must be a valid URL' });
     }
   }
-  appVersionPolicy.latestVersion = latestVersion;
-  appVersionPolicy.minimumSupportedVersion = minimumSupportedVersion;
-  appVersionPolicy.updateUrl = updateUrl;
-  appVersionPolicy.releaseNotes = releaseNotes;
-  appVersionPolicy.forceUpdate = req.body.forceUpdate === true;
-  appVersionPolicy.updatedAt = new Date().toISOString();
-  appVersionPolicy.updatedBy = req.adminActor.id;
+  policy.latestVersion = latestVersion;
+  policy.minimumSupportedVersion = minimumSupportedVersion;
+  policy.updateUrl = updateUrl;
+  policy.releaseNotes = releaseNotes;
+  policy.forceUpdate = req.body.forceUpdate === true;
+  policy.updatedAt = new Date().toISOString();
+  policy.updatedBy = req.adminActor.id;
   recordAdminAction(req, 'version.policy.updated', {
     type: 'version',
-    id: appVersionPolicy.latestVersion,
-    description: `Version policy updated to ${appVersionPolicy.latestVersion}`,
+    id: policy.latestVersion,
+    description: `Version policy updated to ${policy.latestVersion}`,
     tone: 'info',
   });
   persistDb();
-  res.json(appVersionPolicy);
+  res.json(policy);
 });
 
 app.get('/admin/health', requireAdmin, (_req, res) => {
