@@ -743,6 +743,7 @@ function alertBoughtMessage(alert, buyer, bought = {}) {
     cleanDetail('Requested quantity', alert.quantity),
     cleanDetail('Bought quantity', bought.quantity),
     cleanDetail('Price', bought.price),
+    cleanDetail('Done note', bought.note),
   ].filter(Boolean);
   const lines = [`${alert.title} has been done by ${buyer.name}.`];
   if (details.length > 0) lines.push(...details);
@@ -2958,6 +2959,7 @@ app.post('/houses/:houseId/alerts/:alertId/bought', requireAuth, requireHouseMem
     by: req.user.id,
     quantity: req.body.quantity || null,
     price: req.body.price || null,
+    note: req.body.note || null,
     at: new Date().toISOString(),
   };
   persistDb();
