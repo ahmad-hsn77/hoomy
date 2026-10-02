@@ -711,18 +711,32 @@ function messageForClient(message) {
 }
 
 function houseMessages(house, options = {}) {
+  return houseMessagePage(house, options).messages;
+}
+
+function houseMessagePage(house, options = {}) {
   const limit = parseMessageLimit(options.limit);
   const before = parseMessageBefore(options.before);
-  return db.messages
+  const beforeId = options.beforeId?.toString() || '';
+  const filtered = db.messages
     .filter((item) => {
       if (idOf(item.houseId) !== idOf(house.id)) return false;
       if (!before) return true;
-      return new Date(item.createdAt).getTime() < before.getTime();
+      const itemTime = new Date(item.createdAt).getTime();
+      const beforeTime = before.getTime();
+      if (itemTime < beforeTime) return true;
+      if (itemTime > beforeTime || !beforeId) return false;
+      return compareMessagesDescending(item, { id: beforeId, createdAt: before }) > 0;
     })
-    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-    .slice(0, limit)
-    .reverse()
-    .map(messageForClient);
+    .sort(compareMessagesDescending);
+  const page = filtered.slice(0, limit + 1);
+  return {
+    messages: page
+      .slice(0, limit)
+      .reverse()
+      .map(messageForClient),
+    hasMore: page.length > limit,
+  };
 }
 
 function parseMessageLimit(value) {
@@ -735,6 +749,14 @@ function parseMessageBefore(value) {
   if (!value) return null;
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function compareMessagesDescending(a, b) {
+  const aTime = dateMs(a.createdAt);
+  const bTime = dateMs(b.createdAt);
+  const timeDiff = bTime - aTime;
+  if (timeDiff !== 0) return timeDiff;
+  return idOf(b.id).localeCompare(idOf(a.id));
 }
 
 function alertBoughtMessage(alert, buyer, bought = {}) {
@@ -2861,12 +2883,12 @@ app.get('/houses/:houseId/sections/reminders', requireAuth, requireHouseMember, 
 });
 
 app.get('/houses/:houseId/sections/messages', requireAuth, requireHouseMember, (req, res) => {
-  res.json({
-    messages: houseMessages(req.house, {
-      limit: req.query.limit,
-      before: req.query.before,
-    }),
+  const page = houseMessagePage(req.house, {
+    limit: req.query.limit,
+    before: req.query.before,
+    beforeId: req.query.beforeId,
   });
+  res.json(page);
 });
 
 app.get('/houses/:houseId/sections/shortcuts', requireAuth, requireHouseMember, (req, res) => {
