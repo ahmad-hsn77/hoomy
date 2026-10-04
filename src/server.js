@@ -1595,6 +1595,7 @@ async function sendMessagePush({ house, message, sender }) {
   try {
     const response = await firebaseMessaging.sendEachForMulticast({
       tokens,
+      notification: { title, body },
       data: pushData({
         type: 'messageCreated',
         messageId: message.id,
@@ -1612,17 +1613,23 @@ async function sendMessagePush({ house, message, sender }) {
       }),
       android: {
         priority: 'high',
-        collapseKey: 'hoomy-family-chat',
+        notification: {
+          channelId: notificationChannels.chatMessages,
+          icon: 'ic_notification_house',
+          sound: 'message_chime',
+          priority: 'high',
+          visibility: 'public',
+        },
       },
       apns: {
         headers: {
-          'apns-priority': '5',
-          'apns-push-type': 'background',
-          'apns-collapse-id': 'hoomy-family-chat',
+          'apns-priority': '10',
+          'apns-push-type': 'alert',
         },
         payload: {
           aps: {
-            'content-available': 1,
+            alert: { title, body },
+            sound: 'default',
             'thread-id': 'com.idea.hoomy.hoomy.FAMILY_CHAT',
           },
         },
