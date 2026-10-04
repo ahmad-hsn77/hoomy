@@ -1025,6 +1025,7 @@ function createHouseMessage({
   encryptionNonce = null,
   encryptionAlgorithm = null,
   encryptionVersion = null,
+  notificationBody = null,
 }) {
   const replyTo = replyToMessageId
     ? db.messages.find((item) => item.houseId === houseId && item.id === replyToMessageId)
@@ -1074,7 +1075,7 @@ function createHouseMessage({
   const house = db.houses.find((item) => item.id === houseId);
   const sender = db.users.find((item) => item.id === senderId);
   if (house && notify) {
-    sendMessagePush({ house, message, sender }).catch((error) => {
+    sendMessagePush({ house, message, sender, bodyOverride: notificationBody }).catch((error) => {
       console.warn('Message push failed:', error.message);
     });
   }
@@ -1561,14 +1562,14 @@ function logPushError(type, error, extra = {}) {
   });
 }
 
-async function sendMessagePush({ house, message, sender }) {
+async function sendMessagePush({ house, message, sender, bodyOverride = null }) {
   const senderName = sender?.name || 'Family';
   const title = message.system ? 'Family update' : `${senderName} in family chat`;
   const body = message.audio
     ? 'Voice message'
     : message.image
       ? 'Photo'
-      : message.text || 'New family message';
+      : bodyOverride || message.text || 'New family message';
   if (!firebaseMessaging) {
     console.warn('Message push skipped: Firebase Admin is not configured');
     return;
@@ -3285,6 +3286,7 @@ app.post('/houses/:houseId/messages', requireAuth, requireHouseMember, async (re
       encryptionNonce,
       encryptionAlgorithm,
       encryptionVersion,
+      notificationBody: encryptedPayloadPresent ? text : null,
     });
     res.status(201).json(messageForClient(message));
   } catch (error) {
