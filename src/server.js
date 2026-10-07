@@ -136,7 +136,7 @@ if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
 }
 */
 
-const defaultAppLatestVersion = process.env.APP_LATEST_VERSION?.trim() || '0.1.93';
+const defaultAppLatestVersion = process.env.APP_LATEST_VERSION?.trim() || '0.1.94';
 const defaultAppMinimumSupportedVersion = process.env.APP_MIN_SUPPORTED_VERSION?.trim() || '';
 const legacyDefaultAppLatestVersion = '0.1.4';
 
