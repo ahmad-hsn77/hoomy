@@ -13,17 +13,36 @@ import { MongoClient } from 'mongodb';
 import path from 'node:path';
 import { Server } from 'socket.io';
 import { v4 as uuid } from 'uuid';
+import { canReceiveHouseLocation, createLocationCipher, isSecureTransport, redactLocation, validLocation } from './location-security.js';
 
 const app = express();
+const requireHttps = process.env.NODE_ENV === 'production' || process.env.REQUIRE_HTTPS === 'true';
+const proxyHops = Number(process.env.TRUST_PROXY_HOPS || 0);
+if (!Number.isInteger(proxyHops) || proxyHops < 0) throw new Error('Invalid TRUST_PROXY_HOPS');
+if (proxyHops) app.set('trust proxy', proxyHops);
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: { origin: process.env.CORS_ORIGIN || '*' },
+  allowRequest: (req, callback) => callback(null, !requireHttps || isSecureTransport(req, proxyHops > 0)),
 });
 
+app.use((req, res, next) => {
+  if (requireHttps && !req.secure) return res.status(426).json({ message: 'HTTPS is required' });
+  next();
+});
+// Operational dashboard access does not confer access to family coordinates.
+app.use('/admin', (_req, res, next) => {
+  const json = res.json.bind(res);
+  res.json = (body) => json(redactLocation(body));
+  next();
+});
 app.use(cors({ origin: process.env.CORS_ORIGIN || '*' }));
 app.use(express.json({ limit: '8mb' }));
 
 const jwtSecret = process.env.JWT_SECRET || 'dev-secret';
+if (process.env.NODE_ENV === 'production' && jwtSecret === 'dev-secret') {
+  throw new Error('JWT_SECRET is required in production');
+}
 const mediaStorageDir = process.env.MEDIA_STORAGE_DIR?.trim() || path.join(process.cwd(), 'media');
 const mediaPublicPath = '/media';
 const mediaStorageDriver = process.env.MEDIA_STORAGE_DRIVER?.trim().toLowerCase() || 'local';
@@ -167,7 +186,11 @@ const dataStoreConfig = {
   collectionName: process.env.MONGODB_COLLECTION?.trim() || 'app_state',
   documentId: process.env.MONGODB_DOCUMENT_ID?.trim() || 'main',
   mysqlUrl: process.env.MYSQL_URL?.trim() || process.env.DATABASE_URL?.trim(),
+  allowMessageCountDrop: process.env.ALLOW_MESSAGE_COUNT_DROP === 'true',
 };
+const locationCipher = createLocationCipher(process.env, {
+  required: process.env.NODE_ENV === 'production' || Boolean(dataStoreConfig.uri || dataStoreConfig.mysqlUrl),
+});
 let mongoClient = null;
 let dataCollection = null;
 let mongoDatabase = null;
@@ -196,6 +219,7 @@ function publicStoredRecord(item) {
 }
 
 function loadDbState(state = {}) {
+  state = locationCipher.decryptState(state);
   for (const key of Object.keys(db)) {
     if (Array.isArray(state[key])) {
       db[key] = state[key];
@@ -284,12 +308,12 @@ async function loadMongoCollectionsDataStore() {
       .find({})
       .sort({ __order: 1, createdAt: 1 })
       .toArray();
-    db[key] = records.map(publicStoredRecord);
+    db[key] = locationCipher.decryptState(records.map(publicStoredRecord));
   }
   for (const key of objectDataKeys) {
     const saved = await mongoDatabase.collection('app_meta').findOne({ _id: key });
     if (saved?.value && typeof saved.value === 'object') {
-      db[key] = { ...db[key], ...saved.value };
+      db[key] = { ...db[key], ...locationCipher.decryptState(saved.value) };
     }
   }
   const totalRecords = arrayDataKeys.reduce((sum, key) => sum + db[key].length, 0);
@@ -354,15 +378,15 @@ async function loadMysqlDataStore() {
     const [rows] = await mysqlPool.query(
       `SELECT data FROM \`${key}\` ORDER BY sort_order ASC`
     );
-    db[key] = rows.map((row) =>
+    db[key] = locationCipher.decryptState(rows.map((row) =>
       typeof row.data === 'string' ? JSON.parse(row.data) : row.data
-    );
+    ));
   }
   const [metaRows] = await mysqlPool.query('SELECT id, data FROM app_meta');
   for (const row of metaRows) {
     if (!objectDataKeys.includes(row.id)) continue;
     const value = typeof row.data === 'string' ? JSON.parse(row.data) : row.data;
-    db[row.id] = { ...db[row.id], ...value };
+    db[row.id] = { ...db[row.id], ...locationCipher.decryptState(value) };
   }
   normalizeAppVersionPolicy();
   console.log('Loaded Hoomy data from MySQL tables', {
@@ -386,7 +410,7 @@ function persistDb() {
 
 async function persistDbNow() {
   if (!dataCollection && !mongoDatabase && !mysqlPool) return;
-  const state = dbSnapshot();
+  const state = locationCipher.encryptState(dbSnapshot());
   if (dataStoreConfig.driver === 'mongo_collections') {
     persistChain = persistChain.catch(() => {}).then(() =>
       persistMongoCollectionsSnapshot(state)
@@ -402,30 +426,74 @@ async function persistDbNow() {
     return;
   }
   persistChain = persistChain.catch(() => {}).then(() =>
-    dataCollection.updateOne(
-      { _id: dataStoreConfig.documentId },
-      {
-        $set: {
-          state,
-          updatedAt: new Date(),
-        },
-        $setOnInsert: {
-          createdAt: new Date(),
-        },
-      },
-      { upsert: true }
-    )
+    persistMongoDocumentSnapshot(state)
   );
   await persistChain;
+}
+
+async function assertMessageCountDoesNotDrop(nextCount, readCurrentCount) {
+  if (dataStoreConfig.allowMessageCountDrop) return;
+  const currentCount = await readCurrentCount();
+  if (currentCount > nextCount) {
+    throw new Error(
+      `Refusing to persist fewer messages (${nextCount}) than currently stored (${currentCount}). ` +
+      'Set ALLOW_MESSAGE_COUNT_DROP=true only for an intentional restore or migration.'
+    );
+  }
+}
+
+async function persistMongoDocumentSnapshot(state) {
+  await assertMessageCountDoesNotDrop(
+    Array.isArray(state.messages) ? state.messages.length : 0,
+    async () => {
+      const saved = await dataCollection.findOne(
+        { _id: dataStoreConfig.documentId },
+        { projection: { 'state.messages': 1 } }
+      );
+      return Array.isArray(saved?.state?.messages) ? saved.state.messages.length : 0;
+    }
+  );
+  await dataCollection.updateOne(
+    { _id: dataStoreConfig.documentId },
+    {
+      $set: {
+        state,
+        updatedAt: new Date(),
+      },
+      $setOnInsert: {
+        createdAt: new Date(),
+      },
+    },
+    { upsert: true }
+  );
 }
 
 async function persistMongoCollectionsSnapshot(state) {
   for (const key of arrayDataKeys) {
     const collection = mongoDatabase.collection(key);
-    await collection.deleteMany({});
     const records = (state[key] || []).map((item, index) =>
       storedRecord(item, key, index)
     );
+    if (key === 'messages') {
+      await assertMessageCountDoesNotDrop(records.length, () =>
+        collection.countDocuments()
+      );
+      if (records.length > 0) {
+        await collection.bulkWrite(
+          records.map((record) => ({
+            updateOne: {
+              filter: { _id: record._id },
+              update: { $set: record },
+              upsert: true,
+            },
+          })),
+          { ordered: false }
+        );
+      }
+      continue;
+    }
+
+    await collection.deleteMany({});
     if (records.length > 0) await collection.insertMany(records);
   }
   const metaCollection = mongoDatabase.collection('app_meta');
@@ -562,7 +630,7 @@ function requireAuth(req, res, next) {
   try {
     const payload = jwt.verify(token, jwtSecret);
     const user = db.users.find((item) => item.id === payload.userId);
-    if (!user) return res.status(401).json({ message: 'Invalid token' });
+    if (!user || ['suspended', 'disabled', 'deleted'].includes(user.status)) return res.status(401).json({ message: 'Invalid token' });
     req.user = user;
     next();
   } catch {
@@ -1071,7 +1139,7 @@ function createHouseMessage({
   };
   db.messages.push(message);
   persistDb();
-  io.to(houseId).emit('messageCreated', messageForClient(message));
+  houseChannel(houseId).emit('messageCreated', messageForClient(message));
   const house = db.houses.find((item) => item.id === houseId);
   const sender = db.users.find((item) => item.id === senderId);
   if (house && notify) {
@@ -2214,7 +2282,7 @@ app.patch('/admin/messages/:messageId/moderation', requireAdmin, (req, res) => {
     tone: moderationStatus === 'hidden' ? 'danger' : 'info',
   });
   persistDb();
-  io.to(message.houseId).emit('messageUpdated', messageForClient(message));
+  houseChannel(message.houseId).emit('messageUpdated', messageForClient(message));
   res.json(adminMessageSummary(message));
 });
 
@@ -2256,7 +2324,7 @@ app.delete('/admin/reminders/:reminderId', requireAdmin, requireAdminPermission(
     tone: 'warning',
   });
   persistDb();
-  io.to(reminder.houseId).emit('reminderDeleted', { id: reminder.id, houseId: reminder.houseId });
+  houseChannel(reminder.houseId).emit('reminderDeleted', { id: reminder.id, houseId: reminder.houseId });
   const house = houseForId(reminder.houseId);
   if (house) {
     sendReminderCancellationPush({ house, reminder, action: 'deleted' }).catch((error) => {
@@ -2284,7 +2352,7 @@ app.patch('/admin/reminders/:reminderId/stop', requireAdmin, requireAdminPermiss
     tone: 'warning',
   });
   persistDb();
-  io.to(reminder.houseId).emit('reminderDeleted', { id: reminder.id, houseId: reminder.houseId });
+  houseChannel(reminder.houseId).emit('reminderDeleted', { id: reminder.id, houseId: reminder.houseId });
   const house = houseForId(reminder.houseId);
   if (house) {
     sendReminderCancellationPush({ house, reminder, action: 'stopped' }).catch((error) => {
@@ -2811,13 +2879,14 @@ app.put('/users/me/notification-preferences', requireAuth, (req, res) => {
 app.post('/houses', requireAuth, (req, res) => {
   const { name, address, location, role = 'Parent' } = req.body;
   if (!name) return res.status(400).json({ message: 'House name is required' });
+  if (location != null && !validLocation(location)) return res.status(400).json({ message: 'Valid house location is required' });
 
   const createdAt = new Date().toISOString();
   const house = {
     id: uuid(),
     name,
     address: address || '',
-    location: location || null,
+    location: location == null ? null : { lat: location.lat, lng: location.lng },
     createdBy: req.user.id,
     members: [{ userId: req.user.id, role, relation: role, admin: true }],
     createdAt,
@@ -2832,11 +2901,7 @@ app.post('/houses', requireAuth, (req, res) => {
 
 app.put('/houses/:houseId/location', requireAuth, requireHouseMember, (req, res) => {
   const location = req.body.location;
-  if (
-    !location ||
-    typeof location.lat !== 'number' ||
-    typeof location.lng !== 'number'
-  ) {
+  if (!validLocation(location)) {
     return res.status(400).json({ message: 'Valid house location is required' });
   }
 
@@ -2860,13 +2925,13 @@ app.post('/houses/join', requireAuth, (req, res) => {
     membership.relation = relation;
     membership.role = relation;
     persistDb();
-    io.to(house.id).emit('memberUpdated', { houseId: house.id, user: publicUser(req.user), relation });
+    houseChannel(house.id).emit('memberUpdated', { houseId: house.id, user: publicUser(req.user), relation });
     return res.json(houseState(house, req.user.id));
   }
 
   house.members.push({ userId: req.user.id, role: relation, relation, admin: false });
   persistDb();
-  io.to(house.id).emit('memberAdded', { houseId: house.id, user: publicUser(req.user), relation });
+  houseChannel(house.id).emit('memberAdded', { houseId: house.id, user: publicUser(req.user), relation });
   res.status(201).json(houseState(house, req.user.id));
 });
 
@@ -2929,13 +2994,19 @@ app.post('/houses/:houseId/members', requireAuth, requireHouseMember, (req, res)
   req.house.members.push({ userId: user.id, role: relation || 'Member', relation: relation || 'Member', admin: false });
   persistDb();
 
-  io.to(req.house.id).emit('memberAdded', { houseId: req.house.id, user: publicUser(user), relation });
+  houseChannel(req.house.id).emit('memberAdded', { houseId: req.house.id, user: publicUser(user), relation });
   res.status(201).json(houseState(req.house, req.user.id));
 });
 
 app.put('/houses/:houseId/members/me/status', requireAuth, requireHouseMember, (req, res) => {
+  if (req.body.location != null && !validLocation(req.body.location)) {
+    return res.status(400).json({ message: 'Valid member location is required' });
+  }
+  if (typeof req.body.outsideHouse !== 'boolean') {
+    return res.status(400).json({ message: 'outsideHouse must be a boolean' });
+  }
   req.user.outsideHouse = Boolean(req.body.outsideHouse);
-  req.user.lastLocation = req.body.location || null;
+  req.user.lastLocation = req.body.location == null ? null : { lat: req.body.location.lat, lng: req.body.location.lng };
   req.user.locationStatusUpdatedAt = new Date().toISOString();
   persistDb();
 
@@ -2944,7 +3015,7 @@ app.put('/houses/:houseId/members/me/status', requireAuth, requireHouseMember, (
     user: publicUser(req.user),
     relation: req.membership.relation || req.membership.role || 'Member',
   };
-  io.to(req.house.id).emit('memberUpdated', payload);
+  houseChannel(req.house.id).emit('memberUpdated', payload);
   res.json(payload);
 });
 
@@ -2968,7 +3039,7 @@ app.post('/houses/:houseId/alerts', requireAuth, requireHouseMember, (req, res) 
   };
   db.alerts.push(alert);
   persistDb();
-  io.to(req.house.id).emit('alertCreated', alert);
+  houseChannel(req.house.id).emit('alertCreated', alert);
   createHouseMessage({
     houseId: req.house.id,
     senderId: req.user.id,
@@ -2996,7 +3067,7 @@ app.post('/houses/:houseId/alerts/:alertId/bought', requireAuth, requireHouseMem
   };
   persistDb();
 
-  io.to(req.house.id).emit('alertBought', alert);
+  houseChannel(req.house.id).emit('alertBought', alert);
   createHouseMessage({
     houseId: req.house.id,
     senderId: req.user.id,
@@ -3017,7 +3088,7 @@ app.delete('/houses/:houseId/alerts/:alertId', requireAuth, requireHouseMember, 
 
   db.alerts.splice(index, 1);
   persistDb();
-  io.to(req.house.id).emit('alertDeleted', { id: alert.id, houseId: req.house.id });
+  houseChannel(req.house.id).emit('alertDeleted', { id: alert.id, houseId: req.house.id });
   createHouseMessage({
     houseId: req.house.id,
     senderId: req.user.id,
@@ -3060,7 +3131,7 @@ app.post('/houses/:houseId/reminders', requireAuth, requireHouseMember, (req, re
   };
   db.reminders.push(reminder);
   persistDb();
-  io.to(req.house.id).emit('reminderCreated', reminder);
+  houseChannel(req.house.id).emit('reminderCreated', reminder);
   recordReminderScheduleLog({
     reminder,
     house: req.house,
@@ -3108,7 +3179,7 @@ app.put('/houses/:houseId/reminders/:reminderId', requireAuth, requireHouseMembe
   reminder.birthdayMemberId = isBirthday ? birthdayMemberId : null;
   persistDb();
 
-  io.to(req.house.id).emit('reminderUpdated', reminder);
+  houseChannel(req.house.id).emit('reminderUpdated', reminder);
   recordReminderScheduleLog({
     reminder,
     house: req.house,
@@ -3134,7 +3205,7 @@ app.delete('/houses/:houseId/reminders/:reminderId', requireAuth, requireHouseMe
   reminder.deliveryStatus = 'deleted';
   reminder.updatedAt = deletedAt;
   persistDb();
-  io.to(req.house.id).emit('reminderDeleted', { id: reminder.id, houseId: req.house.id });
+  houseChannel(req.house.id).emit('reminderDeleted', { id: reminder.id, houseId: req.house.id });
   sendReminderCancellationPush({ house: req.house, reminder, action: 'deleted' }).catch((error) => {
     console.warn('Reminder deletion cancellation push failed:', error.message);
   });
@@ -3323,7 +3394,7 @@ app.put('/houses/:houseId/messages/:messageId', requireAuth, requireHouseMember,
   message.edited = true;
   message.editedAt = new Date().toISOString();
   persistDb();
-  io.to(req.house.id).emit('messageUpdated', messageForClient(message));
+  houseChannel(req.house.id).emit('messageUpdated', messageForClient(message));
   res.json(messageForClient(message));
 });
 
@@ -3332,7 +3403,7 @@ app.post('/houses/:houseId/messages/:messageId/received', requireAuth, requireHo
   if (!message) return res.status(404).json({ message: 'Message not found' });
   markMessageReceived(message, req.user.id);
   persistDb();
-  io.to(req.house.id).emit('messageUpdated', messageForClient(message));
+  houseChannel(req.house.id).emit('messageUpdated', messageForClient(message));
   res.json(messageForClient(message));
 });
 
@@ -3347,7 +3418,7 @@ app.put('/houses/:houseId/messages/:messageId/reaction', requireAuth, requireHou
 
   setMessageReaction(message, req.user.id, emoji);
   persistDb();
-  io.to(req.house.id).emit('messageUpdated', messageForClient(message));
+  houseChannel(req.house.id).emit('messageUpdated', messageForClient(message));
   res.json(messageForClient(message));
 });
 
@@ -3362,7 +3433,7 @@ app.post('/houses/:houseId/messages/seen', requireAuth, requireHouseMember, (req
   }
   if (updated.length > 0) {
     persistDb();
-    for (const message of updated) io.to(req.house.id).emit('messageUpdated', messageForClient(message));
+    for (const message of updated) houseChannel(req.house.id).emit('messageUpdated', messageForClient(message));
   }
   res.json({ ok: true, messages: updated.map(messageForClient) });
 });
@@ -3378,7 +3449,7 @@ app.post('/houses/:houseId/shortcuts', requireAuth, requireHouseMember, (req, re
   };
   db.shortcuts.push(shortcut);
   persistDb();
-  io.to(req.house.id).emit('shortcutCreated', shortcut);
+  houseChannel(req.house.id).emit('shortcutCreated', shortcut);
   res.status(201).json(shortcut);
 });
 
@@ -3391,7 +3462,7 @@ app.put('/houses/:houseId/shortcuts/:shortcutId', requireAuth, requireHouseMembe
   shortcut.actionValue = req.body.actionValue || shortcut.actionValue;
   persistDb();
 
-  io.to(req.house.id).emit('shortcutUpdated', shortcut);
+  houseChannel(req.house.id).emit('shortcutUpdated', shortcut);
   res.json(shortcut);
 });
 
@@ -3401,14 +3472,18 @@ app.delete('/houses/:houseId/shortcuts/:shortcutId', requireAuth, requireHouseMe
 
   const [shortcut] = db.shortcuts.splice(index, 1);
   persistDb();
-  io.to(req.house.id).emit('shortcutDeleted', { id: shortcut.id, houseId: req.house.id, createdBy: req.user.id });
+  houseChannel(req.house.id).emit('shortcutDeleted', { id: shortcut.id, houseId: req.house.id, createdBy: req.user.id });
   res.json({ ok: true, id: shortcut.id });
 });
 
 io.use((socket, next) => {
   try {
+    if (requireHttps && !isSecureTransport(socket.request, proxyHops > 0)) throw new Error('HTTPS required');
     const payload = jwt.verify(socket.handshake.auth?.token || '', jwtSecret);
+    const user = db.users.find((item) => item.id === payload.userId);
+    if (!user || ['suspended', 'disabled', 'deleted'].includes(user.status)) throw new Error('Unauthorized');
     socket.userId = payload.userId;
+    socket.sessionExpiresAt = payload.exp * 1000;
     next();
   } catch {
     next(new Error('Unauthorized'));
@@ -3417,19 +3492,53 @@ io.use((socket, next) => {
 
 io.on('connection', (socket) => {
   socket.on('joinHouse', (houseId) => {
+    if (typeof houseId !== 'string') return;
     const house = db.houses.find((item) => item.id === houseId);
-    if (house?.members.some((member) => member.userId === socket.userId)) {
+    if (canReceiveHouseLocation({ userId: socket.userId, expiresAt: socket.sessionExpiresAt }, house, db.users)) {
       socket.join(houseId);
+    } else {
+      socket.leave(houseId);
     }
   });
 });
 
+function houseChannel(houseId) {
+  return {
+    emit(event, payload) {
+      const house = db.houses.find((item) => item.id === houseId);
+      const room = io.sockets.adapter.rooms.get(houseId);
+      for (const socketId of room || []) {
+        const socket = io.sockets.sockets.get(socketId);
+        if (!socket) continue;
+        if (!canReceiveHouseLocation({ userId: socket.userId, expiresAt: socket.sessionExpiresAt }, house, db.users)) {
+          socket.leave(houseId);
+          continue;
+        }
+        socket.emit(event, payload);
+      }
+    },
+  };
+}
+
 const port = Number(process.env.PORT || 8080);
 await connectDataStore().catch((error) => {
+  if (dataStoreConfig.uri || dataStoreConfig.mysqlUrl) throw error;
   console.warn('MongoDB connection failed. Data will be stored in memory only.', {
     message: error.message,
   });
 });
+// Rewrite legacy plaintext location fields before accepting requests. Missing
+// decryption keys fail startup, instead of falling back to an empty database.
+await persistDbNow();
+if (dataStoreConfig.driver === 'mongo_collections' && mongoDatabase) {
+  const legacyCollection = mongoDatabase.collection(dataStoreConfig.collectionName);
+  const legacy = await legacyCollection.findOne({ _id: dataStoreConfig.documentId });
+  if (legacy?.state) {
+    await legacyCollection.updateOne({ _id: dataStoreConfig.documentId }, {
+      $set: { state: locationCipher.encryptState(locationCipher.decryptState(legacy.state)) },
+    });
+  }
+}
 await migrateStoredMessageMedia().catch((error) => {
   console.warn('Stored message media migration failed', {
     message: error.message,
