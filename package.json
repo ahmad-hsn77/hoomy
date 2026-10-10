@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "node --watch src/server.js",
     "start": "node src/server.js",
+    "test:location": "node --test test/location-*.test.js",
+    "backup:encrypt-existing": "node scripts/encrypt-existing-backups.js",
     "backup:mongo": "node scripts/backup-mongo-app-state.js",
     "split:mongo": "node scripts/split-mongo-app-state.js",
     "migrate:mysql": "node scripts/migrate-to-mysql.js"
