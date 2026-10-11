@@ -17,6 +17,7 @@ import { canReceiveHouseLocation, createLocationCipher, isSecureTransport, redac
 
 import { createMongoIncrementalStore } from './mongo-incremental-store.js';
 
+const asyncRoute = (handler) => (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
 const app = express();
 const requireHttps = process.env.NODE_ENV === 'production' || process.env.REQUIRE_HTTPS === 'true';
 const proxyHops = Number(process.env.TRUST_PROXY_HOPS || 0);
@@ -269,6 +270,7 @@ async function connectDataStore() {
   }
 
   if (!dataStoreConfig.uri) {
+    if (process.env.NODE_ENV === 'production') throw new Error('MONGODB_URI is required in production');
     console.warn('MongoDB is not configured. Data will be stored in memory only.');
     return;
   }
@@ -340,6 +342,7 @@ async function loadMongoCollectionsDataStore() {
 
 async function connectMysqlDataStore() {
   if (!dataStoreConfig.mysqlUrl) {
+    if (process.env.NODE_ENV === 'production') throw new Error('MYSQL_URL is required in production');
     console.warn('MySQL is not configured. Data will be stored in memory only.');
     return;
   }
@@ -993,7 +996,7 @@ function authState(user, extra = {}) {
   };
 }
 
-function createHouseMessage({
+async function createHouseMessage({
   houseId,
   senderId,
   text,
@@ -1064,7 +1067,7 @@ function createHouseMessage({
     createdAt: new Date().toISOString(),
   };
   db.messages.push(message);
-  persistDb();
+  await persistDbNow();
   houseChannel(houseId).emit('messageCreated', messageForClient(message));
   const house = db.houses.find((item) => item.id === houseId);
   const sender = db.users.find((item) => item.id === senderId);
@@ -2945,7 +2948,7 @@ app.put('/houses/:houseId/members/me/status', requireAuth, requireHouseMember, (
   res.json(payload);
 });
 
-app.post('/houses/:houseId/alerts', requireAuth, requireHouseMember, (req, res) => {
+app.post('/houses/:houseId/alerts', requireAuth, requireHouseMember, asyncRoute(async (req, res) => {
   const targetMemberIds = Array.isArray(req.body.targetMemberIds)
     ? [...req.body.targetMemberIds]
     : [];
@@ -2966,7 +2969,7 @@ app.post('/houses/:houseId/alerts', requireAuth, requireHouseMember, (req, res) 
   db.alerts.push(alert);
   persistDb();
   houseChannel(req.house.id).emit('alertCreated', alert);
-  createHouseMessage({
+  await createHouseMessage({
     houseId: req.house.id,
     senderId: req.user.id,
     text: alert.emergency ? `Emergency need: ${alert.title}` : `Need added: ${alert.title}`,
@@ -2977,9 +2980,9 @@ app.post('/houses/:houseId/alerts', requireAuth, requireHouseMember, (req, res) 
     console.warn('Alert push failed:', error.message);
   });
   res.status(201).json(alert);
-});
+}));
 
-app.post('/houses/:houseId/alerts/:alertId/bought', requireAuth, requireHouseMember, (req, res) => {
+app.post('/houses/:houseId/alerts/:alertId/bought', requireAuth, requireHouseMember, asyncRoute(async (req, res) => {
   const alert = db.alerts.find((item) => item.id === req.params.alertId && item.houseId === req.house.id);
   if (!alert) return res.status(404).json({ message: 'Alert not found' });
 
@@ -2994,16 +2997,16 @@ app.post('/houses/:houseId/alerts/:alertId/bought', requireAuth, requireHouseMem
   persistDb();
 
   houseChannel(req.house.id).emit('alertBought', alert);
-  createHouseMessage({
+  await createHouseMessage({
     houseId: req.house.id,
     senderId: req.user.id,
     text: alertBoughtMessage(alert, req.user, alert.bought),
     system: true,
   });
   res.json(alert);
-});
+}));
 
-app.delete('/houses/:houseId/alerts/:alertId', requireAuth, requireHouseMember, (req, res) => {
+app.delete('/houses/:houseId/alerts/:alertId', requireAuth, requireHouseMember, asyncRoute(async (req, res) => {
   const index = db.alerts.findIndex((item) => item.id === req.params.alertId && item.houseId === req.house.id);
   if (index === -1) return res.status(404).json({ message: 'Alert not found' });
 
@@ -3015,14 +3018,14 @@ app.delete('/houses/:houseId/alerts/:alertId', requireAuth, requireHouseMember, 
   db.alerts.splice(index, 1);
   persistDb();
   houseChannel(req.house.id).emit('alertDeleted', { id: alert.id, houseId: req.house.id });
-  createHouseMessage({
+  await createHouseMessage({
     houseId: req.house.id,
     senderId: req.user.id,
     text: `${req.user.name} canceled ${alert.title}.`,
     system: true,
   });
   res.json({ ok: true, id: alert.id });
-});
+}));
 
 app.post('/houses/:houseId/reminders', requireAuth, requireHouseMember, (req, res) => {
   const isBirthday = req.body.isBirthday === true;
@@ -3261,7 +3264,7 @@ app.post('/houses/:houseId/messages', requireAuth, requireHouseMember, async (re
           })
       : null;
 
-    const message = createHouseMessage({
+    const message = await createHouseMessage({
       houseId: req.house.id,
       senderId: req.user.id,
       text: encryptedPayloadPresent ? 'Encrypted message' : audio ? text || 'Voice message' : image ? text || 'Photo' : text,
@@ -3448,7 +3451,7 @@ function houseChannel(houseId) {
 
 const port = Number(process.env.PORT || 8080);
 await connectDataStore().catch((error) => {
-  if (dataStoreConfig.uri || dataStoreConfig.mysqlUrl) throw error;
+  if (process.env.NODE_ENV === 'production' || dataStoreConfig.uri || dataStoreConfig.mysqlUrl) throw error;
   console.warn('MongoDB connection failed. Data will be stored in memory only.', {
     message: error.message,
   });
@@ -3474,3 +3477,25 @@ await migrateStoredMessageMedia().catch((error) => {
 server.listen(port, () => {
   console.log(`Hoomy backend listening on ${port}`);
 });
+
+let shuttingDown = false;
+async function shutdown() {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  const drained = new Promise((resolve) => server.close(resolve));
+  io.close();
+  clearTimeout(persistTimer);
+  try {
+    await drained;
+    clearTimeout(persistTimer);
+    await persistDbNow();
+    await mongoClient?.close();
+    await mysqlPool?.end();
+    process.exit(0);
+  } catch (error) {
+    console.error('Shutdown persistence failed', { message: error.message });
+    process.exit(1);
+  }
+}
+process.once('SIGTERM', shutdown);
+process.once('SIGINT', shutdown);
