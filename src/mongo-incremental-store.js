@@ -22,6 +22,7 @@ export function createMongoIncrementalStore({ encryptState, recordIdFor, allowMe
     if (document) {
       const set = {};
       for (const [key, value] of Object.entries(next)) {
+        if (key === 'messages') continue;
         if (same(value, previous?.[key])) continue;
         // A shrinking array must be replaced to remove its trailing entries.
         // Appends and edits use individual indices, avoiding chat retransfers.
@@ -41,6 +42,30 @@ export function createMongoIncrementalStore({ encryptState, recordIdFor, allowMe
           $setOnInsert: { createdAt: new Date() },
         }, { upsert: true });
       }
+      const beforeMessages = new Map((previous?.messages || []).map((message) => [message.id, message]));
+      let messageOperations = [];
+      const flushMessages = async () => {
+        if (!messageOperations.length) return;
+        await document.bulkWrite(messageOperations, { ordered: true });
+        messageOperations = [];
+      };
+      for (const message of next.messages) {
+        if (!message.id) throw new Error('Cannot persist a message without an ID');
+        if (same(message, beforeMessages.get(message.id))) continue;
+        const encrypted = encryptState(message);
+        // Atomic conditional append: overlapping deployments must not replace
+        // a message at an array index or append the same ID twice.
+        messageOperations.push({ updateOne: {
+          filter: { _id: documentId, 'state.messages.id': { $ne: message.id } },
+          update: { $push: { 'state.messages': encrypted } },
+        } }, { updateOne: {
+          filter: { _id: documentId, 'state.messages.id': message.id },
+          update: { $set: { 'state.messages.$[message]': encrypted } },
+          arrayFilters: [{ 'message.id': message.id }],
+        } });
+        if (messageOperations.length >= 500) await flushMessages();
+      }
+      await flushMessages();
     } else {
       for (const [key, value] of Object.entries(next)) {
         if (same(value, previous?.[key])) continue;
@@ -65,7 +90,10 @@ export function createMongoIncrementalStore({ encryptState, recordIdFor, allowMe
           }
           before.delete(id);
         });
-        for (const id of before.keys()) operations.push({ deleteOne: { filter: { _id: id } } });
+        // A stale snapshot is never authorization to remove chat history.
+        if (key !== 'messages') {
+          for (const id of before.keys()) operations.push({ deleteOne: { filter: { _id: id } } });
+        }
         if (operations.length) await database.collection(key).bulkWrite(operations, { ordered: true });
       }
     }
