@@ -15,6 +15,8 @@ import { Server } from 'socket.io';
 import { v4 as uuid } from 'uuid';
 import { canReceiveHouseLocation, createLocationCipher, isSecureTransport, redactLocation, validLocation } from './location-security.js';
 
+import { createMongoIncrementalStore } from './mongo-incremental-store.js';
+
 const app = express();
 const requireHttps = process.env.NODE_ENV === 'production' || process.env.REQUIRE_HTTPS === 'true';
 const proxyHops = Number(process.env.TRUST_PROXY_HOPS || 0);
@@ -408,104 +410,28 @@ function persistDb() {
   }, 25);
 }
 
+const mongoIncrementalStore = createMongoIncrementalStore({
+  encryptState: locationCipher.encryptState,
+  recordIdFor,
+  allowMessageCountDrop: dataStoreConfig.allowMessageCountDrop,
+});
+
 async function persistDbNow() {
   if (!dataCollection && !mongoDatabase && !mysqlPool) return;
-  const state = locationCipher.encryptState(dbSnapshot());
-  if (dataStoreConfig.driver === 'mongo_collections') {
-    persistChain = persistChain.catch(() => {}).then(() =>
-      persistMongoCollectionsSnapshot(state)
-    );
-    await persistChain;
-    return;
-  }
-  if (dataStoreConfig.driver === 'mysql') {
-    persistChain = persistChain.catch(() => {}).then(() =>
-      persistMysqlSnapshot(state)
-    );
-    await persistChain;
-    return;
-  }
+  // Capture now, including nested fields, so queued updates cannot mutate an
+  // earlier write. Compare and commit inside the queue to preserve ordering.
+  const state = structuredClone(dbSnapshot());
   persistChain = persistChain.catch(() => {}).then(() =>
-    persistMongoDocumentSnapshot(state)
+    dataStoreConfig.driver === 'mysql'
+      ? persistMysqlSnapshot(locationCipher.encryptState(state))
+      : mongoIncrementalStore.persist(state, {
+          document: dataStoreConfig.driver === 'mongo_collections' ? null : dataCollection,
+          database: mongoDatabase,
+          documentId: dataStoreConfig.documentId,
+        })
   );
   await persistChain;
 }
-
-async function assertMessageCountDoesNotDrop(nextCount, readCurrentCount) {
-  if (dataStoreConfig.allowMessageCountDrop) return;
-  const currentCount = await readCurrentCount();
-  if (currentCount > nextCount) {
-    throw new Error(
-      `Refusing to persist fewer messages (${nextCount}) than currently stored (${currentCount}). ` +
-      'Set ALLOW_MESSAGE_COUNT_DROP=true only for an intentional restore or migration.'
-    );
-  }
-}
-
-async function persistMongoDocumentSnapshot(state) {
-  await assertMessageCountDoesNotDrop(
-    Array.isArray(state.messages) ? state.messages.length : 0,
-    async () => {
-      const saved = await dataCollection.findOne(
-        { _id: dataStoreConfig.documentId },
-        { projection: { 'state.messages': 1 } }
-      );
-      return Array.isArray(saved?.state?.messages) ? saved.state.messages.length : 0;
-    }
-  );
-  await dataCollection.updateOne(
-    { _id: dataStoreConfig.documentId },
-    {
-      $set: {
-        state,
-        updatedAt: new Date(),
-      },
-      $setOnInsert: {
-        createdAt: new Date(),
-      },
-    },
-    { upsert: true }
-  );
-}
-
-async function persistMongoCollectionsSnapshot(state) {
-  for (const key of arrayDataKeys) {
-    const collection = mongoDatabase.collection(key);
-    const records = (state[key] || []).map((item, index) =>
-      storedRecord(item, key, index)
-    );
-    if (key === 'messages') {
-      await assertMessageCountDoesNotDrop(records.length, () =>
-        collection.countDocuments()
-      );
-      if (records.length > 0) {
-        await collection.bulkWrite(
-          records.map((record) => ({
-            updateOne: {
-              filter: { _id: record._id },
-              update: { $set: record },
-              upsert: true,
-            },
-          })),
-          { ordered: false }
-        );
-      }
-      continue;
-    }
-
-    await collection.deleteMany({});
-    if (records.length > 0) await collection.insertMany(records);
-  }
-  const metaCollection = mongoDatabase.collection('app_meta');
-  for (const key of objectDataKeys) {
-    await metaCollection.updateOne(
-      { _id: key },
-      { $set: { value: state[key], updatedAt: new Date() } },
-      { upsert: true }
-    );
-  }
-}
-
 async function persistMysqlSnapshot(state) {
   const connection = await mysqlPool.getConnection();
   try {
