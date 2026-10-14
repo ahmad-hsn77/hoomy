@@ -173,6 +173,7 @@ const db = {
   adminAuditLogs: [],
   notificationLogs: [],
   adminUsers: [],
+  feedback: [],
   appVersionPolicy: {
     latestVersion: defaultAppLatestVersion,
     minimumSupportedVersion: defaultAppMinimumSupportedVersion,
@@ -2291,7 +2292,7 @@ app.patch('/admin/reminders/:reminderId/stop', requireAdmin, requireAdminPermiss
   res.json({ ok: true, reminder: adminReminderSummary(reminder) });
 });
 
-app.get('/admin/reports', requireAdmin, (req, res) => {
+app.get('/admin/reports', requireAdmin, requireAdminPermission('reports:view'), (req, res) => {
   const query = adminListQuery(req.query);
   const reports = db.messages
     .map(adminMessageSummary)
@@ -2306,8 +2307,113 @@ app.get('/admin/reports', requireAdmin, (req, res) => {
       createdAt: message.createdAt,
       summary: message.text,
     }));
-  res.json(paginate(reports, query));
+  reports.push(...db.feedback.map((item) => ({
+    ...item,
+    title: item.type === 'problem' ? 'Problem report' : item.type === 'idea' ? 'Improvement idea' : 'User feedback',
+    summary: item.description + (item.expected ? `\nExpected: ${item.expected}` : ''),
+    houseName: houseForId(item.houseId)?.name || 'No house',
+    userName: userForId(item.userId)?.name || 'Member',
+    type: 'feedback',
+  })));
+  const filtered = reports.filter((item) =>
+    (!query.status || query.status === 'all' || item.status === query.status) &&
+    matchesSearch([item.title, item.summary, item.userName, item.houseName], query.search)
+  ).sort((a, b) => dateMs(b.createdAt) - dateMs(a.createdAt));
+  res.json(paginate(filtered, query));
 });
+
+app.post('/feedback', requireAuth, asyncRoute(async (req, res) => {
+  const type = req.body.type;
+  const description = typeof req.body.description === 'string' ? req.body.description.trim() : '';
+  const expected = typeof req.body.expected === 'string' ? req.body.expected.trim() : '';
+  const screen = req.body.screen || null;
+  const process = req.body.process || null;
+  if ((screen && !['home', 'chat', 'calendar', 'settings', 'account', 'house', 'map', 'other'].includes(screen)) ||
+      (process && !['opening', 'navigation', 'sending_message', 'sending_media', 'loading_history', 'needs', 'reminders', 'location', 'notifications', 'account', 'other'].includes(process))) {
+    return res.status(400).json({ message: 'Invalid screen or action' });
+  }
+  if (!['problem', 'idea', 'feedback'].includes(type) || description.length < 5 || description.length > 3000 || expected.length > 1000) {
+    return res.status(400).json({ message: 'Choose a type and describe your feedback (5–3000 characters).' });
+  }
+  const recent = db.feedback.filter((item) => item.userId === req.user.id && dateMs(item.createdAt) > Date.now() - 3600000);
+  if (recent.length >= 10) return res.status(429).json({ message: 'Please try again later.' });
+  const houseId = req.body.houseId;
+  if (houseId && !housesForUser(req.user.id).some((house) => house.id === houseId)) {
+    return res.status(403).json({ message: 'House access denied' });
+  }
+  const item = {
+    id: uuid(), userId: req.user.id, houseId: houseId || null, type,
+    description, expected, status: 'new', createdAt: new Date().toISOString(),
+    screen, process,
+    appVersion: typeof req.body.appVersion === 'string' ? req.body.appVersion.slice(0, 40) : '',
+    platform: typeof req.body.platform === 'string' ? req.body.platform.slice(0, 40) : '',
+  };
+  db.feedback.push(item);
+  await persistDbNow();
+  res.status(201).json({ id: item.id, status: item.status });
+}));
+
+app.patch('/admin/feedback/:id', requireAdmin, requireAdminPermission('reports:view'), asyncRoute(async (req, res) => {
+  const item = db.feedback.find((entry) => entry.id === req.params.id);
+  if (!item) return res.status(404).json({ message: 'Feedback not found' });
+  if (!['new', 'in_progress', 'resolved', 'closed'].includes(req.body.status)) return res.status(400).json({ message: 'Invalid status' });
+  item.status = req.body.status;
+  item.updatedAt = new Date().toISOString();
+  await persistDbNow();
+  res.json({ ok: true });
+}));
+
+function feedbackForUser(item) {
+  return {
+    id: item.id, title: item.title || item.description.slice(0, 80), type: item.type,
+    description: item.description, expected: item.expected, screen: item.screen,
+    process: item.process, status: item.status === 'resolved' ? 'closed' : item.status,
+    createdAt: item.createdAt, updatedAt: item.updatedAt,
+    replies: (item.replies || []).map(({ id, author, text, createdAt }) => ({ id, author, text, createdAt })),
+  };
+}
+
+app.get('/feedback', requireAuth, (req, res) => {
+  const items = db.feedback.filter((item) => item.userId === req.user.id)
+    .sort((a, b) => dateMs(b.createdAt) - dateMs(a.createdAt));
+  res.json(paginate(items.map(feedbackForUser), adminListQuery(req.query)));
+});
+
+app.get('/feedback/:id', requireAuth, (req, res) => {
+  const item = db.feedback.find((entry) => entry.id === req.params.id && entry.userId === req.user.id);
+  if (!item) return res.status(404).json({ message: 'Report not found' });
+  res.json(feedbackForUser(item));
+});
+
+app.get('/admin/feedback', requireAdmin, requireAdminPermission('reports:view'), (req, res) => {
+  const query = adminListQuery(req.query);
+  const items = db.feedback.map((item) => ({ ...feedbackForUser(item),
+    userName: userForId(item.userId)?.name || 'Member', appVersion: item.appVersion, platform: item.platform,
+  })).filter((item) => (!query.status || query.status === 'all' || item.status === query.status) &&
+    matchesSearch([item.title, item.description, item.userName], query.search))
+    .sort((a, b) => dateMs(b.createdAt) - dateMs(a.createdAt));
+  res.json(paginate(items, query));
+});
+
+async function replyToFeedback(req, res, admin) {
+  const item = db.feedback.find((entry) => entry.id === req.params.id && (admin || entry.userId === req.user.id));
+  if (!item) return res.status(404).json({ message: 'Report not found' });
+  const text = typeof req.body.text === 'string' ? req.body.text.trim() : '';
+  if (!text || text.length > 3000) return res.status(400).json({ message: 'Reply must be 1–3000 characters' });
+  const recent = (item.replies || []).filter((reply) => reply.authorId === (admin ? req.adminActor.id : req.user.id) && dateMs(reply.createdAt) > Date.now() - 3600000);
+  if (recent.length >= 30) return res.status(429).json({ message: 'Please try again later' });
+  item.replies ||= [];
+  item.replies.push({ id: uuid(), author: admin ? 'support' : 'user', authorId: admin ? req.adminActor.id : req.user.id,
+    text, createdAt: new Date().toISOString() });
+  item.updatedAt = new Date().toISOString();
+  // A follow-up from the user reopens the conversation so it is not overlooked.
+  if (!admin && ['closed', 'resolved'].includes(item.status)) item.status = 'new';
+  await persistDbNow();
+  res.status(201).json(feedbackForUser(item));
+}
+
+app.post('/feedback/:id/replies', requireAuth, asyncRoute((req, res) => replyToFeedback(req, res, false)));
+app.post('/admin/feedback/:id/replies', requireAdmin, requireAdminPermission('reports:view'), asyncRoute((req, res) => replyToFeedback(req, res, true)));
 
 app.get('/admin/notifications', requireAdmin, (_req, res) => {
   const usersWithTokens = db.users.filter((user) => (user.fcmTokens || []).length > 0);
