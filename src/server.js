@@ -475,7 +475,7 @@ const defaultNotificationPreferences = {
 const notificationChannels = {
   emergencyAlerts: 'hoomy_emergency_alerts_alarm_v2',
   needAlerts: 'hoomy_need_alerts_high_v2',
-  chatMessages: 'hoomy_chat_messages_high_v3',
+  chatMessages: 'hoomy_chat_messages_default_v4',
   reminders: 'hoomy_reminders_alarm_v1',
 };
 const allowedMessageReactions = ['❤️', '😂', '👍', '🙏', '😮', '😢'];
@@ -1615,7 +1615,7 @@ async function sendMessagePush({ house, message, sender, bodyOverride = null }) 
         notification: {
           channelId: notificationChannels.chatMessages,
           icon: 'ic_notification_house',
-          sound: 'message_chime',
+          sound: 'default',
           priority: 'high',
           visibility: 'public',
         },
