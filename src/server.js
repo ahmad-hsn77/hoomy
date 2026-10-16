@@ -2329,12 +2329,21 @@ app.post('/feedback', requireAuth, asyncRoute(async (req, res) => {
   const screen = req.body.screen || null;
   const process = req.body.process || null;
   if ((screen && !['home', 'chat', 'calendar', 'settings', 'account', 'house', 'map', 'other'].includes(screen)) ||
-      (process && !['opening', 'navigation', 'sending_message', 'sending_media', 'loading_history', 'needs', 'reminders', 'location', 'notifications', 'account', 'other'].includes(process))) {
+      (process && !['opening', 'navigation', 'sending_message', 'sending_media', 'viewing_image', 'playing_audio', 'opening_keyboard', 'loading_history', 'needs', 'reminders', 'location', 'notifications', 'account', 'other'].includes(process))) {
     return res.status(400).json({ message: 'Invalid screen or action' });
   }
   if (!['problem', 'idea', 'feedback'].includes(type) || description.length < 5 || description.length > 3000 || expected.length > 1000) {
     return res.status(400).json({ message: 'Choose a type and describe your feedback (5–3000 characters).' });
   }
+  const frequency = req.body.frequency || null;
+  const network = req.body.network || null;
+  const steps = req.body.steps == null ? '' : req.body.steps;
+  if ((frequency && !['every_time', 'sometimes', 'once'].includes(frequency)) ||
+      (network && !['wifi', 'mobile', 'both', 'not_sure'].includes(network)) ||
+      typeof steps !== 'string' || steps.length > 2000) {
+    return res.status(400).json({ message: 'Invalid feedback details' });
+  }
+  const diagnosticText = (value, max) => typeof value === 'string' ? value.trim().slice(0, max) : '';
   const recent = db.feedback.filter((item) => item.userId === req.user.id && dateMs(item.createdAt) > Date.now() - 3600000);
   if (recent.length >= 10) return res.status(429).json({ message: 'Please try again later.' });
   const houseId = req.body.houseId;
@@ -2345,6 +2354,10 @@ app.post('/feedback', requireAuth, asyncRoute(async (req, res) => {
     id: uuid(), userId: req.user.id, houseId: houseId || null, type,
     description, expected, status: 'new', createdAt: new Date().toISOString(),
     screen, process,
+    frequency, network, steps: steps.trim(),
+    deviceModel: diagnosticText(req.body.deviceModel, 120),
+    osVersion: diagnosticText(req.body.osVersion, 120),
+    language: diagnosticText(req.body.language, 20),
     appVersion: typeof req.body.appVersion === 'string' ? req.body.appVersion.slice(0, 40) : '',
     platform: typeof req.body.platform === 'string' ? req.body.platform.slice(0, 40) : '',
   };
@@ -2368,6 +2381,8 @@ function feedbackForUser(item) {
     id: item.id, title: item.title || item.description.slice(0, 80), type: item.type,
     description: item.description, expected: item.expected, screen: item.screen,
     process: item.process, status: item.status === 'resolved' ? 'closed' : item.status,
+    frequency: item.frequency, network: item.network, steps: item.steps,
+    deviceModel: item.deviceModel, osVersion: item.osVersion, language: item.language,
     createdAt: item.createdAt, updatedAt: item.updatedAt,
     replies: (item.replies || []).map(({ id, author, text, createdAt }) => ({ id, author, text, createdAt })),
   };
