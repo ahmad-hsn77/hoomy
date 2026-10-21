@@ -13,6 +13,8 @@ export const arrayDataKeys = [
   'adminAuditLogs',
   'notificationLogs',
   'adminUsers',
+  'feedback',
+  'activityNotifications',
 ];
 
 export const objectDataKeys = ['appVersionPolicy'];
