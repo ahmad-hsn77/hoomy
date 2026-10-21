@@ -174,6 +174,7 @@ const db = {
   notificationLogs: [],
   adminUsers: [],
   feedback: [],
+  activityNotifications: [],
   appVersionPolicy: {
     latestVersion: defaultAppLatestVersion,
     minimumSupportedVersion: defaultAppMinimumSupportedVersion,
@@ -657,10 +658,23 @@ function houseState(house, userId) {
   };
 }
 
+function unreadActivityCount(houseId, userId) {
+  return db.activityNotifications.filter((item) => item.houseId === houseId && !(item.readBy || []).includes(userId)).length;
+}
+
+function createActivityNotification({ houseId, actorId, text, type = 'activity', targetId = null }) {
+  const item = { id: uuid(), houseId, actorId, text, type, targetId, createdAt: new Date().toISOString(), readBy: [] };
+  db.activityNotifications.push(item);
+  persistDb();
+  houseChannel(houseId).emit('activityNotificationCreated', item);
+  return item;
+}
+
 function houseSummary(house, user) {
   const membership = house.members.find((member) => idOf(member.userId) === idOf(user.id));
   return {
     house,
+    unreadNotificationCount: unreadActivityCount(house.id, user.id),
     houses: housesForUser(user.id),
     user: publicUser({
       ...user,
@@ -718,6 +732,7 @@ function houseMessagePage(house, options = {}) {
   const beforeId = options.beforeId?.toString() || '';
   const filtered = db.messages
     .filter((item) => {
+      if (item.system) return false;
       if (idOf(item.houseId) !== idOf(house.id)) return false;
       if (!before) return true;
       const itemTime = new Date(item.createdAt).getTime();
@@ -1025,6 +1040,11 @@ async function createHouseMessage({
   encryptionVersion = null,
   notificationBody = null,
 }) {
+  if (system) {
+    const notification = createActivityNotification({ houseId, actorId: senderId, text });
+    await persistDbNow();
+    return notification;
+  }
   const replyTo = replyToMessageId
     ? db.messages.find((item) => item.houseId === houseId && item.id === replyToMessageId)
     : null;
@@ -3069,6 +3089,34 @@ app.put('/houses/:houseId/members/me/status', requireAuth, requireHouseMember, (
   res.json(payload);
 });
 
+app.get('/houses/:houseId/notifications', requireAuth, requireHouseMember, (req, res) => {
+  const limit = parseMessageLimit(req.query.limit);
+  const before = req.query.before ? new Date(req.query.before) : null;
+  if (before && Number.isNaN(before.getTime())) return res.status(400).json({ message: 'Invalid cursor' });
+  const cursor = { createdAt: before, id: req.query.beforeId?.toString() || '' };
+  const items = db.activityNotifications.filter((item) => item.houseId === req.house.id &&
+    (!before || compareMessagesDescending(item, cursor) > 0)).sort(compareMessagesDescending).slice(0, limit + 1);
+  const page = items.slice(0, limit).map(({ readBy, ...item }) => ({ ...item, read: (readBy || []).includes(req.user.id) }));
+  const last = page.at(-1);
+  res.json({ items: page, hasMore: items.length > limit,
+    nextBefore: last?.createdAt || null, nextBeforeId: last?.id || null,
+    unreadCount: unreadActivityCount(req.house.id, req.user.id) });
+});
+
+app.post('/houses/:houseId/notifications/read', requireAuth, requireHouseMember, asyncRoute(async (req, res) => {
+  const ids = req.body.ids;
+  if (!Array.isArray(ids) || ids.length > 50 || ids.some((id) => typeof id !== 'string')) return res.status(400).json({ message: 'Invalid notification IDs' });
+  for (const item of db.activityNotifications) {
+    if (item.houseId !== req.house.id || !ids.includes(item.id)) continue;
+    item.readBy ||= [];
+    if (!item.readBy.includes(req.user.id)) item.readBy.push(req.user.id);
+  }
+  await persistDbNow();
+  const unreadCount = unreadActivityCount(req.house.id, req.user.id);
+  houseChannel(req.house.id).emit('activityNotificationsRead', { userId: req.user.id, houseId: req.house.id, ids, unreadCount });
+  res.json({ unreadCount });
+}));
+
 app.post('/houses/:houseId/alerts', requireAuth, requireHouseMember, asyncRoute(async (req, res) => {
   const targetMemberIds = Array.isArray(req.body.targetMemberIds)
     ? [...req.body.targetMemberIds]
@@ -3148,7 +3196,7 @@ app.delete('/houses/:houseId/alerts/:alertId', requireAuth, requireHouseMember, 
   res.json({ ok: true, id: alert.id });
 }));
 
-app.post('/houses/:houseId/reminders', requireAuth, requireHouseMember, (req, res) => {
+app.post('/houses/:houseId/reminders', requireAuth, requireHouseMember, asyncRoute(async (req, res) => {
   const isBirthday = req.body.isBirthday === true;
   const recurrence = normalizeReminderRecurrence(req.body.recurrence);
   const recurrenceWeekdays = normalizeReminderWeekdays(req.body.recurrenceWeekdays, recurrence);
@@ -3182,6 +3230,8 @@ app.post('/houses/:houseId/reminders', requireAuth, requireHouseMember, (req, re
   db.reminders.push(reminder);
   persistDb();
   houseChannel(req.house.id).emit('reminderCreated', reminder);
+  createActivityNotification({ houseId: req.house.id, actorId: req.user.id, text: 'Reminder added: ' + reminder.title, type: 'reminderCreated', targetId: reminder.id });
+  await persistDbNow();
   recordReminderScheduleLog({
     reminder,
     house: req.house,
@@ -3192,9 +3242,9 @@ app.post('/houses/:houseId/reminders', requireAuth, requireHouseMember, (req, re
     console.warn('Reminder push failed:', error.message);
   });
   res.status(201).json(reminder);
-});
+}));
 
-app.put('/houses/:houseId/reminders/:reminderId', requireAuth, requireHouseMember, (req, res) => {
+app.put('/houses/:houseId/reminders/:reminderId', requireAuth, requireHouseMember, asyncRoute(async (req, res) => {
   const reminder = db.reminders.find((item) =>
     item.id === req.params.reminderId &&
     item.houseId === req.house.id &&
@@ -3230,6 +3280,8 @@ app.put('/houses/:houseId/reminders/:reminderId', requireAuth, requireHouseMembe
   persistDb();
 
   houseChannel(req.house.id).emit('reminderUpdated', reminder);
+  createActivityNotification({ houseId: req.house.id, actorId: req.user.id, text: 'Reminder updated: ' + reminder.title, type: 'reminderUpdated', targetId: reminder.id });
+  await persistDbNow();
   recordReminderScheduleLog({
     reminder,
     house: req.house,
@@ -3237,9 +3289,9 @@ app.put('/houses/:houseId/reminders/:reminderId', requireAuth, requireHouseMembe
     action: 'updated',
   });
   res.json(reminder);
-});
+}));
 
-app.delete('/houses/:houseId/reminders/:reminderId', requireAuth, requireHouseMember, (req, res) => {
+app.delete('/houses/:houseId/reminders/:reminderId', requireAuth, requireHouseMember, asyncRoute(async (req, res) => {
   const reminder = db.reminders.find((item) =>
     item.id === req.params.reminderId &&
     item.houseId === req.house.id &&
@@ -3256,11 +3308,13 @@ app.delete('/houses/:houseId/reminders/:reminderId', requireAuth, requireHouseMe
   reminder.updatedAt = deletedAt;
   persistDb();
   houseChannel(req.house.id).emit('reminderDeleted', { id: reminder.id, houseId: req.house.id });
+  createActivityNotification({ houseId: req.house.id, actorId: req.user.id, text: 'Reminder canceled: ' + reminder.title, type: 'reminderDeleted', targetId: reminder.id });
+  await persistDbNow();
   sendReminderCancellationPush({ house: req.house, reminder, action: 'deleted' }).catch((error) => {
     console.warn('Reminder deletion cancellation push failed:', error.message);
   });
   res.json({ ok: true, id: reminder.id });
-});
+}));
 
 app.post('/houses/:houseId/messages/media-upload', requireAuth, requireHouseMember, async (req, res) => {
   const type = req.body.type?.toString();
@@ -3475,7 +3529,7 @@ app.put('/houses/:houseId/messages/:messageId/reaction', requireAuth, requireHou
 app.post('/houses/:houseId/messages/seen', requireAuth, requireHouseMember, (req, res) => {
   const updated = [];
   for (const message of db.messages) {
-    if (message.houseId !== req.house.id || message.senderId === req.user.id) continue;
+    if (message.system || message.houseId !== req.house.id || message.senderId === req.user.id) continue;
     const before = JSON.stringify({ receivedBy: message.receivedBy, seenBy: message.seenBy });
     markMessageSeen(message, req.user.id);
     const after = JSON.stringify({ receivedBy: message.receivedBy, seenBy: message.seenBy });
@@ -3577,6 +3631,16 @@ await connectDataStore().catch((error) => {
     message: error.message,
   });
 });
+// Copy legacy Hoomy action messages into the notification feed once. Keep the
+// source records archived for recovery; chat endpoints exclude system records.
+const activityIds = new Set(db.activityNotifications.map((item) => item.id));
+for (const message of db.messages) {
+  if (!message.system || activityIds.has(message.id)) continue;
+  db.activityNotifications.push({ id: message.id, houseId: message.houseId,
+    actorId: message.senderId, text: message.text, type: 'activity',
+    createdAt: message.createdAt, readBy: [...(message.seenBy || [])] });
+  activityIds.add(message.id);
+}
 // Rewrite legacy plaintext location fields before accepting requests. Missing
 // decryption keys fail startup, instead of falling back to an empty database.
 await persistDbNow();
