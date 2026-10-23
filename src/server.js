@@ -2342,6 +2342,30 @@ app.get('/admin/reports', requireAdmin, requireAdminPermission('reports:view'), 
   res.json(paginate(filtered, query));
 });
 
+function notifyReportOwner(item, action) {
+  const owner = userForId(item.userId);
+  if (!owner || !firebaseMessaging || !(owner.fcmTokens || []).length) return;
+  const arabicLetters = (item.description.match(/(?=\p{Letter})\p{Script_Extensions=Arabic}/gu) || []).length;
+  const latinLetters = (item.description.match(/(?=\p{Letter})\p{Script_Extensions=Latin}/gu) || []).length;
+  const arabic = arabicLetters === latinLetters ? /^ar(?:[-_]|$)/i.test(item.language || '') : arabicLetters > latinLetters;
+  const bodies = {
+    received: ['We received your report. Our team will review it.', 'تم استلام تقريرك، وسيقوم فريقنا بمراجعته.'],
+    supportReply: ['Our team replied to your report.', 'أرسل فريقنا ردًا على تقريرك.'],
+    userReply: ['Your reply has been received by our team.', 'تم استلام ردك من قبل فريقنا.'],
+    new: ['Your report is open for review.', 'تقريرك مفتوح للمراجعة.'],
+    in_progress: ['Our team is reviewing your report.', 'يقوم فريقنا بمراجعة تقريرك.'],
+    resolved: ['Your report has been resolved.', 'تم حل تقريرك.'],
+    closed: ['Your report has been closed.', 'تم إغلاق تقريرك.'],
+  };
+  const body = bodies[action]?.[arabic ? 1 : 0];
+  if (!body) return;
+  // Generic previews avoid exposing private report details on the lock screen.
+  sendAdminNotification({ recipients: [owner], title: arabic ? 'تقارير هومي' : 'Hoomy reports', body,
+    data: { type: 'reportUpdated', reportId: item.id, action } }).catch((error) => {
+    console.warn('Report notification failed', { reportId: item.id, message: error.message });
+  });
+}
+
 app.post('/feedback', requireAuth, asyncRoute(async (req, res) => {
   const type = req.body.type;
   const description = typeof req.body.description === 'string' ? req.body.description.trim() : '';
@@ -2381,8 +2405,21 @@ app.post('/feedback', requireAuth, asyncRoute(async (req, res) => {
     appVersion: typeof req.body.appVersion === 'string' ? req.body.appVersion.slice(0, 40) : '',
     platform: typeof req.body.platform === 'string' ? req.body.platform.slice(0, 40) : '',
   };
+  // Detect the report's language rather than relying on the app's UI language.
+  const arabicLetters = (description.match(/(?=\p{Letter})\p{Script_Extensions=Arabic}/gu) || []).length;
+  const latinLetters = (description.match(/(?=\p{Letter})\p{Script_Extensions=Latin}/gu) || []).length;
+  const arabic = arabicLetters === latinLetters
+    ? /^ar(?:[-_]|$)/i.test(item.language)
+    : arabicLetters > latinLetters;
+  item.replies = [{
+    id: uuid(), author: 'support', createdAt: item.createdAt,
+    text: arabic
+      ? 'رد تلقائي: شكرًا لتواصلك معنا ومساعدتنا في تحسين هومي! تم استلام تقريرك، وسيقوم فريقنا بمراجعته.'
+      : 'Automatic reply: Thank you for contacting us and helping improve Hoomy! We have received your report, and our team will review it.',
+  }];
   db.feedback.push(item);
   await persistDbNow();
+  notifyReportOwner(item, 'received');
   res.status(201).json({ id: item.id, status: item.status });
 }));
 
@@ -2390,9 +2427,11 @@ app.patch('/admin/feedback/:id', requireAdmin, requireAdminPermission('reports:v
   const item = db.feedback.find((entry) => entry.id === req.params.id);
   if (!item) return res.status(404).json({ message: 'Feedback not found' });
   if (!['new', 'in_progress', 'resolved', 'closed'].includes(req.body.status)) return res.status(400).json({ message: 'Invalid status' });
+  const changed = item.status !== req.body.status;
   item.status = req.body.status;
   item.updatedAt = new Date().toISOString();
   await persistDbNow();
+  if (changed) notifyReportOwner(item, item.status);
   res.json({ ok: true });
 }));
 
@@ -2444,6 +2483,7 @@ async function replyToFeedback(req, res, admin) {
   // A follow-up from the user reopens the conversation so it is not overlooked.
   if (!admin && ['closed', 'resolved'].includes(item.status)) item.status = 'new';
   await persistDbNow();
+  notifyReportOwner(item, admin ? 'supportReply' : 'userReply');
   res.status(201).json(feedbackForUser(item));
 }
 
@@ -3104,16 +3144,17 @@ app.get('/houses/:houseId/notifications', requireAuth, requireHouseMember, (req,
 });
 
 app.post('/houses/:houseId/notifications/read', requireAuth, requireHouseMember, asyncRoute(async (req, res) => {
+  const all = req.body.all === true;
   const ids = req.body.ids;
   if (!Array.isArray(ids) || ids.length > 50 || ids.some((id) => typeof id !== 'string')) return res.status(400).json({ message: 'Invalid notification IDs' });
   for (const item of db.activityNotifications) {
-    if (item.houseId !== req.house.id || !ids.includes(item.id)) continue;
+    if (item.houseId !== req.house.id || (!all && !ids.includes(item.id))) continue;
     item.readBy ||= [];
     if (!item.readBy.includes(req.user.id)) item.readBy.push(req.user.id);
   }
   await persistDbNow();
   const unreadCount = unreadActivityCount(req.house.id, req.user.id);
-  houseChannel(req.house.id).emit('activityNotificationsRead', { userId: req.user.id, houseId: req.house.id, ids, unreadCount });
+  houseChannel(req.house.id).emit('activityNotificationsRead', { userId: req.user.id, houseId: req.house.id, ids, all, unreadCount });
   res.json({ unreadCount });
 }));
 
