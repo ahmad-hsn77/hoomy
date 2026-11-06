@@ -9,6 +9,7 @@ export const arrayDataKeys = [
   'reminders',
   'messages',
   'shortcuts',
+  'dailyTasks',
   'passwordResetRequests',
   'adminAuditLogs',
   'notificationLogs',
