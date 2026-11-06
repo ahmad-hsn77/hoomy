@@ -16,6 +16,7 @@ import { v4 as uuid } from 'uuid';
 import { canReceiveHouseLocation, createLocationCipher, isSecureTransport, redactLocation, validLocation } from './location-security.js';
 
 import { createMongoIncrementalStore } from './mongo-incremental-store.js';
+import { registerDailyTaskRoutes } from './daily-tasks.js';
 
 const asyncRoute = (handler) => (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
 const app = express();
@@ -169,6 +170,7 @@ const db = {
   reminders: [],
   messages: [],
   shortcuts: [],
+  dailyTasks: [],
   passwordResetRequests: [],
   adminAuditLogs: [],
   notificationLogs: [],
@@ -2312,6 +2314,37 @@ app.patch('/admin/reminders/:reminderId/stop', requireAdmin, requireAdminPermiss
   res.json({ ok: true, reminder: adminReminderSummary(reminder) });
 });
 
+function feedbackUserActivityCount(item) {
+  return 1 + (item.replies || []).filter((reply) => reply.author === 'user').length;
+}
+
+function feedbackAdminUnread(item) {
+  return Math.max(0, feedbackUserActivityCount(item) - (item.adminReadUserActivityCount || 0));
+}
+
+app.get('/admin/feedback/unread', requireAdmin, requireAdminPermission('reports:view'), (req, res) => {
+  const ids = new Set(String(req.query.ids || '').split(',').slice(0, 50));
+  res.json({ unreadCount: db.feedback.reduce((total, item) => total + feedbackAdminUnread(item), 0),
+    reports: db.feedback.filter((item) => ids.has(item.id)).map((item) => ({ id: item.id, unreadCount: feedbackAdminUnread(item) })) });
+});
+
+app.get('/admin/feedback/:id', requireAdmin, requireAdminPermission('reports:view'), (req, res) => {
+  const item = db.feedback.find((entry) => entry.id === req.params.id);
+  if (!item) return res.status(404).json({ message: 'Report not found' });
+  res.json({ ...feedbackForUser(item), userName: userForId(item.userId)?.name || 'Member',
+    appVersion: item.appVersion, platform: item.platform, userActivityCount: feedbackUserActivityCount(item), adminUnreadCount: feedbackAdminUnread(item) });
+});
+
+app.post('/admin/feedback/:id/read', requireAdmin, requireAdminPermission('reports:view'), asyncRoute(async (req, res) => {
+  const item = db.feedback.find((entry) => entry.id === req.params.id);
+  if (!item) return res.status(404).json({ message: 'Report not found' });
+  const through = req.body.through;
+  if (!Number.isSafeInteger(through) || through < 0 || through > feedbackUserActivityCount(item)) return res.status(400).json({ message: 'Invalid read position' });
+  item.adminReadUserActivityCount = Math.max(item.adminReadUserActivityCount || 0, through);
+  await persistDbNow();
+  res.json({ unreadCount: feedbackAdminUnread(item) });
+}));
+
 app.get('/admin/reports', requireAdmin, requireAdminPermission('reports:view'), (req, res) => {
   const query = adminListQuery(req.query);
   const reports = db.messages
@@ -2329,6 +2362,7 @@ app.get('/admin/reports', requireAdmin, requireAdminPermission('reports:view'), 
     }));
   reports.push(...db.feedback.map((item) => ({
     ...item,
+    userActivityCount: feedbackUserActivityCount(item), adminUnreadCount: feedbackAdminUnread(item),
     title: item.type === 'problem' ? 'Problem report' : item.type === 'idea' ? 'Improvement idea' : 'User feedback',
     summary: item.description + (item.expected ? `\nExpected: ${item.expected}` : ''),
     houseName: houseForId(item.houseId)?.name || 'No house',
@@ -2462,6 +2496,7 @@ app.get('/feedback/:id', requireAuth, (req, res) => {
 app.get('/admin/feedback', requireAdmin, requireAdminPermission('reports:view'), (req, res) => {
   const query = adminListQuery(req.query);
   const items = db.feedback.map((item) => ({ ...feedbackForUser(item),
+    userActivityCount: feedbackUserActivityCount(item), adminUnreadCount: feedbackAdminUnread(item),
     userName: userForId(item.userId)?.name || 'Member', appVersion: item.appVersion, platform: item.platform,
   })).filter((item) => (!query.status || query.status === 'all' || item.status === query.status) &&
     matchesSearch([item.title, item.description, item.userName], query.search))
@@ -3052,6 +3087,9 @@ app.get('/houses/:houseId/state', requireAuth, requireHouseMember, (req, res) =>
 app.get('/houses/:houseId/summary', requireAuth, requireHouseMember, (req, res) => {
   res.json(houseSummary(req.house, req.user));
 });
+
+registerDailyTaskRoutes(app, { db, requireAuth, requireHouseMember, asyncRoute, persistDbNow,
+  changed: (houseId) => houseChannel(houseId).emit('dailyTasksChanged', { houseId }) });
 
 app.get('/houses/:houseId/sections/members', requireAuth, requireHouseMember, (req, res) => {
   res.json({ members: houseMembers(req.house) });
