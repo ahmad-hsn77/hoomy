@@ -676,6 +676,7 @@ function houseSummary(house, user) {
   const membership = house.members.find((member) => idOf(member.userId) === idOf(user.id));
   return {
     house,
+    subscription: houseSubscription(house),
     unreadNotificationCount: unreadActivityCount(house.id, user.id),
     houses: housesForUser(user.id),
     user: familyMemberForHouse(house, {
@@ -877,11 +878,12 @@ function adminUserSummary(user) {
 
 function houseSubscription(house) {
   const paidUntil = house.subscriptionPaidUntil || null;
-  return { active: paidUntil !== null && Date.parse(paidUntil) > Date.now(), paidUntil };
+  return { active: paidUntil !== null && Date.parse(paidUntil) > Date.now(), paidUntil,
+    enforced: process.env.REQUIRE_FAMILY_SUBSCRIPTION !== 'false' };
 }
 
 function familyFeaturesAllowed(house) {
-  return process.env.REQUIRE_FAMILY_SUBSCRIPTION !== 'true' || (house != null && houseSubscription(house).active);
+  return process.env.REQUIRE_FAMILY_SUBSCRIPTION === 'false' || (house != null && houseSubscription(house).active);
 }
 
 function requireFamilySubscription(req, res, next) {
@@ -913,6 +915,7 @@ app.patch('/admin/houses/:houseId/subscription', requireAdmin, requireAdminPermi
   recordAdminAction(req, 'house.subscription.updated', { type: 'house', id: house.id,
     description: house.subscriptionPaidUntil ? `Subscription set through ${house.subscriptionPaidUntil}` : 'Subscription cleared' });
   await persistDbNow();
+  houseChannel(house.id).emit('familySubscriptionChanged', { houseId: house.id });
   res.json(houseSubscription(house));
 }));
 
