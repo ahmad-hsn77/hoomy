@@ -532,7 +532,7 @@ function signAdmin(admin) {
   );
 }
 
-const superAdminPermissions = ['all', 'reminders:delete', 'reminders:stop'];
+const superAdminPermissions = ['all', 'reminders:delete', 'reminders:stop', 'subscriptions:manage'];
 
 function adminPermissions(admin) {
   const permissions = Array.isArray(admin.permissions) ? admin.permissions : [];
@@ -651,11 +651,11 @@ function houseState(house, userId) {
   return {
     house,
     houses: housesForUser(userId),
-    user: publicUser(db.users.find((user) => idOf(user.id) === idOf(userId)) || {}),
+    user: familyMemberForHouse(house, db.users.find((user) => idOf(user.id) === idOf(userId)) || {}),
     members: houseMembers(house),
     alerts: houseAlerts(house),
-    reminders: houseReminders(house),
-    messages: houseMessages(house),
+    reminders: familyFeaturesAllowed(house) ? houseReminders(house) : [],
+    messages: familyFeaturesAllowed(house) ? houseMessages(house) : [],
     shortcuts: houseShortcuts(house, userId),
   };
 }
@@ -678,7 +678,7 @@ function houseSummary(house, user) {
     house,
     unreadNotificationCount: unreadActivityCount(house.id, user.id),
     houses: housesForUser(user.id),
-    user: publicUser({
+    user: familyMemberForHouse(house, {
       ...user,
       relation: membership?.relation || membership?.role || user.relation || 'Member',
     }),
@@ -688,7 +688,7 @@ function houseSummary(house, user) {
 function houseMembers(house) {
   return house.members.map((member) => ({
     ...member,
-    user: publicUser(db.users.find((user) => idOf(user.id) === idOf(member.userId)) || {}),
+    user: familyMemberForHouse(house, db.users.find((user) => idOf(user.id) === idOf(member.userId)) || {}),
   }));
 }
 
@@ -875,6 +875,47 @@ function adminUserSummary(user) {
   };
 }
 
+function houseSubscription(house) {
+  const paidUntil = house.subscriptionPaidUntil || null;
+  return { active: paidUntil !== null && Date.parse(paidUntil) > Date.now(), paidUntil };
+}
+
+function familyFeaturesAllowed(house) {
+  return process.env.REQUIRE_FAMILY_SUBSCRIPTION !== 'true' || (house != null && houseSubscription(house).active);
+}
+
+function requireFamilySubscription(req, res, next) {
+  if (!familyFeaturesAllowed(req.house)) {
+    return res.status(402).json({ code: 'family_subscription_required', message: 'An active Hoomy Family Plan is required. Open the plan on Home to contact support.' });
+  }
+  next();
+}
+
+function familyMemberForHouse(house, user) {
+  const value = publicUser(user);
+  return familyFeaturesAllowed(house) ? value : { ...value, lastLocation: null, locationStatusUpdatedAt: null };
+}
+
+app.get('/houses/:houseId/subscription', requireAuth, requireHouseMember, (req, res) => {
+  res.json(houseSubscription(req.house));
+});
+
+app.patch('/admin/houses/:houseId/subscription', requireAdmin, requireAdminPermission('subscriptions:manage'), asyncRoute(async (req, res) => {
+  if (req.adminActor.role !== 'super_admin') return res.status(403).json({ message: 'Super admin required' });
+  const house = houseForId(req.params.houseId);
+  if (!house) return res.status(404).json({ message: 'House not found' });
+  const paidUntil = req.body.paidUntil;
+  const expiry = typeof paidUntil === 'string' ? Date.parse(paidUntil) : NaN;
+  if (paidUntil !== null && (!Number.isFinite(expiry) || expiry <= Date.now())) {
+    return res.status(400).json({ message: 'Choose a future expiry date or clear the subscription.' });
+  }
+  house.subscriptionPaidUntil = paidUntil === null ? null : new Date(expiry).toISOString();
+  recordAdminAction(req, 'house.subscription.updated', { type: 'house', id: house.id,
+    description: house.subscriptionPaidUntil ? `Subscription set through ${house.subscriptionPaidUntil}` : 'Subscription cleared' });
+  await persistDbNow();
+  res.json(houseSubscription(house));
+}));
+
 function adminHouseSummary(house) {
   const alerts = houseAlerts(house);
   const reminders = houseReminders(house);
@@ -882,6 +923,7 @@ function adminHouseSummary(house) {
   return {
     ...house,
     membersCount: house.members.length,
+    subscription: houseSubscription(house),
     openNeedsCount: alerts.filter((alert) => alert.status !== 'bought').length,
     urgentNeedsCount: alerts.filter((alert) => alert.emergency === true).length,
     remindersCount: reminders.length,
@@ -1583,6 +1625,7 @@ function logPushError(type, error, extra = {}) {
 }
 
 async function sendMessagePush({ house, message, sender, bodyOverride = null }) {
+  if (!familyFeaturesAllowed(house)) return;
   const senderName = sender?.name || 'Family';
   const title = message.system ? 'Family update' : `${senderName} in family chat`;
   const body = message.audio
@@ -1809,6 +1852,7 @@ async function sendAlertPush({ house, alert, creator }) {
 }
 
 async function sendReminderPush({ house, reminder, creator }) {
+  if (!familyFeaturesAllowed(house)) return;
   const title = `Family reminder: ${reminder.title}`;
   const body = reminder.note || `${creator.name} added a reminder.`;
   if (!firebaseMessaging) {
@@ -3044,7 +3088,7 @@ app.post('/houses', requireAuth, (req, res) => {
   res.status(201).json(houseState(house, req.user.id));
 });
 
-app.put('/houses/:houseId/location', requireAuth, requireHouseMember, (req, res) => {
+app.put('/houses/:houseId/location', requireAuth, requireHouseMember, requireFamilySubscription, (req, res) => {
   const location = req.body.location;
   if (!validLocation(location)) {
     return res.status(400).json({ message: 'Valid house location is required' });
@@ -3099,11 +3143,11 @@ app.get('/houses/:houseId/sections/alerts', requireAuth, requireHouseMember, (re
   res.json({ alerts: houseAlerts(req.house) });
 });
 
-app.get('/houses/:houseId/sections/reminders', requireAuth, requireHouseMember, (req, res) => {
+app.get('/houses/:houseId/sections/reminders', requireAuth, requireHouseMember, requireFamilySubscription, (req, res) => {
   res.json({ reminders: houseReminders(req.house) });
 });
 
-app.get('/houses/:houseId/sections/messages', requireAuth, requireHouseMember, (req, res) => {
+app.get('/houses/:houseId/sections/messages', requireAuth, requireHouseMember, requireFamilySubscription, (req, res) => {
   const page = houseMessagePage(req.house, {
     limit: req.query.limit,
     before: req.query.before,
@@ -3146,7 +3190,7 @@ app.post('/houses/:houseId/members', requireAuth, requireHouseMember, (req, res)
   res.status(201).json(houseState(req.house, req.user.id));
 });
 
-app.put('/houses/:houseId/members/me/status', requireAuth, requireHouseMember, (req, res) => {
+app.put('/houses/:houseId/members/me/status', requireAuth, requireHouseMember, requireFamilySubscription, (req, res) => {
   if (req.body.location != null && !validLocation(req.body.location)) {
     return res.status(400).json({ message: 'Valid member location is required' });
   }
@@ -3275,7 +3319,7 @@ app.delete('/houses/:houseId/alerts/:alertId', requireAuth, requireHouseMember, 
   res.json({ ok: true, id: alert.id });
 }));
 
-app.post('/houses/:houseId/reminders', requireAuth, requireHouseMember, asyncRoute(async (req, res) => {
+app.post('/houses/:houseId/reminders', requireAuth, requireHouseMember, requireFamilySubscription, asyncRoute(async (req, res) => {
   const isBirthday = req.body.isBirthday === true;
   const recurrence = normalizeReminderRecurrence(req.body.recurrence);
   const recurrenceWeekdays = normalizeReminderWeekdays(req.body.recurrenceWeekdays, recurrence);
@@ -3323,7 +3367,7 @@ app.post('/houses/:houseId/reminders', requireAuth, requireHouseMember, asyncRou
   res.status(201).json(reminder);
 }));
 
-app.put('/houses/:houseId/reminders/:reminderId', requireAuth, requireHouseMember, asyncRoute(async (req, res) => {
+app.put('/houses/:houseId/reminders/:reminderId', requireAuth, requireHouseMember, requireFamilySubscription, asyncRoute(async (req, res) => {
   const reminder = db.reminders.find((item) =>
     item.id === req.params.reminderId &&
     item.houseId === req.house.id &&
@@ -3370,7 +3414,7 @@ app.put('/houses/:houseId/reminders/:reminderId', requireAuth, requireHouseMembe
   res.json(reminder);
 }));
 
-app.delete('/houses/:houseId/reminders/:reminderId', requireAuth, requireHouseMember, asyncRoute(async (req, res) => {
+app.delete('/houses/:houseId/reminders/:reminderId', requireAuth, requireHouseMember, requireFamilySubscription, asyncRoute(async (req, res) => {
   const reminder = db.reminders.find((item) =>
     item.id === req.params.reminderId &&
     item.houseId === req.house.id &&
@@ -3395,7 +3439,7 @@ app.delete('/houses/:houseId/reminders/:reminderId', requireAuth, requireHouseMe
   res.json({ ok: true, id: reminder.id });
 }));
 
-app.post('/houses/:houseId/messages/media-upload', requireAuth, requireHouseMember, async (req, res) => {
+app.post('/houses/:houseId/messages/media-upload', requireAuth, requireHouseMember, requireFamilySubscription, async (req, res) => {
   const type = req.body.type?.toString();
   const mimeType = req.body.mimeType?.toString() || (type === 'audio' ? 'audio/mp4' : 'image/jpeg');
   const sizeBytes = Number(req.body.sizeBytes);
@@ -3441,7 +3485,7 @@ app.post('/houses/:houseId/messages/media-upload', requireAuth, requireHouseMemb
   }
 });
 
-app.post('/houses/:houseId/messages', requireAuth, requireHouseMember, async (req, res) => {
+app.post('/houses/:houseId/messages', requireAuth, requireHouseMember, requireFamilySubscription, async (req, res) => {
   const replyToMessageId = req.body.replyToMessageId ? req.body.replyToMessageId.toString() : null;
   if (replyToMessageId) {
     const replyTo = db.messages.find((item) => item.houseId === req.house.id && item.id === replyToMessageId);
@@ -3548,7 +3592,7 @@ app.post('/houses/:houseId/messages', requireAuth, requireHouseMember, async (re
   }
 });
 
-app.put('/houses/:houseId/messages/:messageId', requireAuth, requireHouseMember, (req, res) => {
+app.put('/houses/:houseId/messages/:messageId', requireAuth, requireHouseMember, requireFamilySubscription, (req, res) => {
   const message = db.messages.find((item) => item.houseId === req.house.id && item.id === req.params.messageId);
   if (!message) return res.status(404).json({ message: 'Message not found' });
   if (message.system) return res.status(400).json({ message: 'System messages cannot be edited' });
@@ -3581,7 +3625,7 @@ app.put('/houses/:houseId/messages/:messageId', requireAuth, requireHouseMember,
   res.json(messageForClient(message));
 });
 
-app.post('/houses/:houseId/messages/:messageId/received', requireAuth, requireHouseMember, (req, res) => {
+app.post('/houses/:houseId/messages/:messageId/received', requireAuth, requireHouseMember, requireFamilySubscription, (req, res) => {
   const message = db.messages.find((item) => item.houseId === req.house.id && item.id === req.params.messageId);
   if (!message) return res.status(404).json({ message: 'Message not found' });
   markMessageReceived(message, req.user.id);
@@ -3590,7 +3634,7 @@ app.post('/houses/:houseId/messages/:messageId/received', requireAuth, requireHo
   res.json(messageForClient(message));
 });
 
-app.put('/houses/:houseId/messages/:messageId/reaction', requireAuth, requireHouseMember, (req, res) => {
+app.put('/houses/:houseId/messages/:messageId/reaction', requireAuth, requireHouseMember, requireFamilySubscription, (req, res) => {
   const message = db.messages.find((item) => item.houseId === req.house.id && item.id === req.params.messageId);
   if (!message) return res.status(404).json({ message: 'Message not found' });
 
@@ -3605,7 +3649,7 @@ app.put('/houses/:houseId/messages/:messageId/reaction', requireAuth, requireHou
   res.json(messageForClient(message));
 });
 
-app.post('/houses/:houseId/messages/seen', requireAuth, requireHouseMember, (req, res) => {
+app.post('/houses/:houseId/messages/seen', requireAuth, requireHouseMember, requireFamilySubscription, (req, res) => {
   const updated = [];
   for (const message of db.messages) {
     if (message.system || message.houseId !== req.house.id || message.senderId === req.user.id) continue;
@@ -3689,6 +3733,7 @@ function houseChannel(houseId) {
   return {
     emit(event, payload) {
       const house = db.houses.find((item) => item.id === houseId);
+      if (/^(message|reminder|memberUpdated)/.test(event) && !familyFeaturesAllowed(house)) return;
       const room = io.sockets.adapter.rooms.get(houseId);
       for (const socketId of room || []) {
         const socket = io.sockets.sockets.get(socketId);
@@ -3697,7 +3742,8 @@ function houseChannel(houseId) {
           socket.leave(houseId);
           continue;
         }
-        socket.emit(event, payload);
+        socket.emit(event, event === 'memberAdded' && payload?.user && !familyFeaturesAllowed(house)
+          ? { ...payload, user: familyMemberForHouse(house, payload.user) } : payload);
       }
     },
   };
