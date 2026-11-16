@@ -492,7 +492,7 @@ function normalize(value) {
 }
 
 function publicUser(user) {
-  const { passwordHash, firebasePhoneUid, verifiedPhone, ...safeUser } = user;
+  const { passwordHash, firebasePhoneUid, verifiedPhone, phoneResetAuthTime, ...safeUser } = user;
   return {
     ...safeUser,
     notificationPreferences: {
@@ -2839,6 +2839,27 @@ app.post('/auth/forgot-password', (_req, res) => {
 app.post('/auth/reset-password', (_req, res) => {
   res.status(410).json({ message: 'Password reset is unavailable. Contact Hoomy support.' });
 });
+
+app.post('/auth/firebase-phone/reset-password', asyncRoute(async (req, res) => {
+  const { newPassword } = req.body;
+  if (typeof newPassword !== 'string' || newPassword.length < 8 || Buffer.byteLength(newPassword, 'utf8') > 72) {
+    return res.status(400).json({ message: 'Use at least 8 characters and no more than 72 UTF-8 bytes.' });
+  }
+  const identity = await verifiedFirebasePhone(req, res);
+  if (!identity) return;
+  const user = db.users.find((entry) => entry.firebasePhoneUid === identity.uid &&
+    entry.verifiedPhone === identity.phone_number && !entry.childMode && (entry.status || 'active') === 'active');
+  const eligible = () => user && user.firebasePhoneUid === identity.uid &&
+    user.verifiedPhone === identity.phone_number && (user.status || 'active') === 'active' &&
+    identity.auth_time > (user.phoneResetAuthTime || 0);
+  if (!eligible()) return res.status(403).json({ message: 'Verify again with a phone linked to your Hoomy account.' });
+  const hash = await bcrypt.hash(newPassword, 10);
+  if (!eligible()) return res.status(403).json({ message: 'Verify again with a phone linked to your Hoomy account.' });
+  user.passwordHash = hash;
+  user.phoneResetAuthTime = identity.auth_time;
+  await persistDbNow();
+  res.json({ ok: true });
+}));
 
 app.get('/auth/me', requireAuth, (req, res) => {
   const updatedClientInfo = updateUserClientInfo(req.user, {
