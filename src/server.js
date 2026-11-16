@@ -6,6 +6,7 @@ import cors from 'cors';
 import express from 'express';
 import { applicationDefault, cert, initializeApp } from 'firebase-admin/app';
 import { getMessaging } from 'firebase-admin/messaging';
+import { getAuth } from 'firebase-admin/auth';
 import http from 'node:http';
 import fs from 'node:fs/promises';
 import jwt from 'jsonwebtoken';
@@ -491,7 +492,7 @@ function normalize(value) {
 }
 
 function publicUser(user) {
-  const { passwordHash, ...safeUser } = user;
+  const { passwordHash, firebasePhoneUid, verifiedPhone, ...safeUser } = user;
   return {
     ...safeUser,
     notificationPreferences: {
@@ -2790,48 +2791,53 @@ app.post('/auth/login', async (req, res) => {
   res.json(authState(user, { token: sign(user) }));
 });
 
-app.post('/auth/forgot-password', (req, res) => {
-  const { email, phone } = req.body;
-  const user = findUserByIdentity({ email, phone });
-  if (!user || user.childMode) {
-    return res.status(404).json({ message: 'Account not found' });
+async function verifiedFirebasePhone(req, res) {
+  if (!firebaseApp) {
+    res.status(503).json({ message: 'Phone sign-in is unavailable.' });
+    return null;
   }
+  try {
+    const token = await getAuth(firebaseApp).verifyIdToken(req.body.idToken, true);
+    const age = Date.now() / 1000 - token.auth_time;
+    if (token.aud === 'hoomy-267dd' && token.firebase?.sign_in_provider === 'phone' &&
+        /^\+[1-9]\d{7,14}$/.test(token.phone_number || '') && age >= -30 && age <= 300) return token;
+  } catch (_) { /* Never log credentials or ID tokens. */ }
+  res.status(401).json({ message: 'Verify your phone again.' });
+  return null;
+}
 
-  const resetRequest = {
-    id: uuid(),
-    userId: user.id,
-    contact: user.email || user.phone,
-    createdAt: new Date().toISOString(),
-    usedAt: null,
-  };
-  db.passwordResetRequests.push(resetRequest);
-  persistDb();
+app.post('/auth/firebase-phone', asyncRoute(async (req, res) => {
+  const identity = await verifiedFirebasePhone(req, res);
+  if (!identity) return;
+  const user = db.users.find((entry) => entry.firebasePhoneUid === identity.uid &&
+    entry.verifiedPhone === identity.phone_number && !entry.childMode && (entry.status || 'active') === 'active');
+  if (!user) return res.status(403).json({ message: 'Sign in with your Hoomy password and link this phone in Settings first.' });
+  res.json(authState(user, { token: sign(user) }));
+}));
 
-  // Prototype behavior: no email/SMS provider is connected yet, so the app can proceed to reset.
-  res.json({
-    ok: true,
-    message: 'Password reset request created',
-    resetRequestId: resetRequest.id,
-  });
+app.post('/auth/firebase-phone/link', requireAuth, asyncRoute(async (req, res) => {
+  if (req.user.childMode || !req.user.passwordHash || typeof req.body.password !== 'string' ||
+      !await bcrypt.compare(req.body.password, req.user.passwordHash)) {
+    return res.status(403).json({ message: 'Your current Hoomy password is required.' });
+  }
+  const identity = await verifiedFirebasePhone(req, res);
+  if (!identity) return;
+  if (db.users.some((entry) => entry.id !== req.user.id &&
+    (entry.firebasePhoneUid === identity.uid || entry.verifiedPhone === identity.phone_number))) {
+    return res.status(409).json({ message: 'This verified phone is already linked to another account.' });
+  }
+  req.user.firebasePhoneUid = identity.uid;
+  req.user.verifiedPhone = identity.phone_number;
+  await persistDbNow();
+  res.json({ ok: true });
+}));
+
+app.post('/auth/forgot-password', (_req, res) => {
+  res.status(410).json({ message: 'Password reset is unavailable. Contact Hoomy support.' });
 });
 
-app.post('/auth/reset-password', async (req, res) => {
-  const { email, phone, newPassword } = req.body;
-  if (!newPassword || newPassword.toString().length < 4) {
-    return res.status(400).json({ message: 'New password must be at least 4 characters' });
-  }
-
-  const user = findUserByIdentity({ email, phone });
-  if (!user || user.childMode) {
-    return res.status(404).json({ message: 'Account not found' });
-  }
-
-  user.passwordHash = await bcrypt.hash(newPassword.toString(), 10);
-  const request = [...db.passwordResetRequests].reverse().find((item) => item.userId === user.id && !item.usedAt);
-  if (request) request.usedAt = new Date().toISOString();
-  persistDb();
-
-  res.json({ ok: true, message: 'Password reset successfully' });
+app.post('/auth/reset-password', (_req, res) => {
+  res.status(410).json({ message: 'Password reset is unavailable. Contact Hoomy support.' });
 });
 
 app.get('/auth/me', requireAuth, (req, res) => {
