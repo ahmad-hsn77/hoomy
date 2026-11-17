@@ -6,7 +6,6 @@ import cors from 'cors';
 import express from 'express';
 import { applicationDefault, cert, initializeApp } from 'firebase-admin/app';
 import { getMessaging } from 'firebase-admin/messaging';
-import { getAuth } from 'firebase-admin/auth';
 import http from 'node:http';
 import fs from 'node:fs/promises';
 import jwt from 'jsonwebtoken';
@@ -18,6 +17,7 @@ import { canReceiveHouseLocation, createLocationCipher, isSecureTransport, redac
 
 import { createMongoIncrementalStore } from './mongo-incremental-store.js';
 import { registerDailyTaskRoutes } from './daily-tasks.js';
+import { createEmailAuth } from './email-auth.js';
 
 const asyncRoute = (handler) => (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
 const app = express();
@@ -48,6 +48,10 @@ const jwtSecret = process.env.JWT_SECRET || 'dev-secret';
 if (process.env.NODE_ENV === 'production' && jwtSecret === 'dev-secret') {
   throw new Error('JWT_SECRET is required in production');
 }
+const emailAuth = createEmailAuth(jwtSecret, {
+  apiKey: process.env.RESEND_API_KEY?.trim(),
+  from: process.env.AUTH_EMAIL_FROM?.trim(),
+});
 const mediaStorageDir = process.env.MEDIA_STORAGE_DIR?.trim() || path.join(process.cwd(), 'media');
 const mediaPublicPath = '/media';
 const mediaStorageDriver = process.env.MEDIA_STORAGE_DRIVER?.trim().toLowerCase() || 'local';
@@ -492,7 +496,7 @@ function normalize(value) {
 }
 
 function publicUser(user) {
-  const { passwordHash, firebasePhoneUid, verifiedPhone, phoneResetAuthTime, ...safeUser } = user;
+  const { passwordHash, firebasePhoneUid, verifiedPhone, phoneResetAuthTime, authVersion, fcmTokens, ...safeUser } = user;
   return {
     ...safeUser,
     notificationPreferences: {
@@ -517,7 +521,7 @@ function findUserByIdentity({ email, phone, childName }) {
 }
 
 function sign(user) {
-  return jwt.sign({ userId: user.id }, jwtSecret, { expiresIn: '30d' });
+  return jwt.sign({ userId: user.id, authVersion: user.authVersion || 0 }, jwtSecret, { expiresIn: '30d' });
 }
 
 function signAdmin(admin) {
@@ -564,7 +568,8 @@ function requireAuth(req, res, next) {
   try {
     const payload = jwt.verify(token, jwtSecret);
     const user = db.users.find((item) => item.id === payload.userId);
-    if (!user || ['suspended', 'disabled', 'deleted'].includes(user.status)) return res.status(401).json({ message: 'Invalid token' });
+    if (!user || (payload.authVersion || 0) !== (user.authVersion || 0) ||
+        ['suspended', 'disabled', 'deleted'].includes(user.status)) return res.status(401).json({ message: 'Invalid token' });
     req.user = user;
     next();
   } catch {
@@ -2751,115 +2756,149 @@ app.get('/admin/audit-log', requireAdmin, (req, res) => {
   res.json(paginate(logs, query));
 });
 
-app.post('/auth/register', async (req, res) => {
-  const { name, email, phone, password, childMode = false } = req.body;
-  const normalizedName = name?.toString().trim();
+function authEmail(value) {
+  const email = typeof value === 'string' ? normalize(value) : '';
+  return email.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : '';
+}
+
+function validAuthPassword(value) {
+  return typeof value === 'string' && value.length >= 8 && Buffer.byteLength(value) <= 72;
+}
+
+function invalidEmailCode(res) {
+  return res.status(400).json({ message: 'The email code is incorrect or expired.' });
+}
+
+function verifiedRecoveryUser(email) {
+  const user = findUserByIdentity({ email });
+  return user && user.emailVerifiedAt && !user.childMode && (user.status || 'active') === 'active' ? user : null;
+}
+
+function resetCodeKey(user, email) {
+  return JSON.stringify(['reset', user?.id || null, email, user?.authVersion || 0]);
+}
+
+function emailCodeRequest(purpose) {
+  return asyncRoute(async (req, res) => {
+    const email = authEmail(req.body.email);
+    if (!email) return res.status(400).json({ message: 'Enter a valid email address.' });
+    if (!emailAuth.ready) return res.status(503).json({ message: 'Email verification is unavailable.' });
+    const existing = findUserByIdentity({ email });
+    const user = purpose === 'reset' ? verifiedRecoveryUser(email) : req.user;
+    const eligible = purpose === 'signup'
+      ? !existing
+      : Boolean(user && !user.childMode && (!existing || existing.id === user.id));
+    const delivery = emailAuth.issue({
+      key: purpose === 'reset' ? resetCodeKey(user, email) : JSON.stringify([purpose, user?.id || null, email]),
+      purpose, email, ip: req.ip, eligible, arabic: req.body.language === 'ar',
+    });
+    if (purpose === 'reset') {
+      // Keep the response identical regardless of account and delivery status.
+      void delivery;
+      return res.status(202).json({ ok: true });
+    }
+    const status = await delivery;
+    if (status === 429) return res.status(429).json({ message: 'Wait before requesting another code.' });
+    if (status === 502) return res.status(502).json({ message: 'Could not send the email. Try again shortly.' });
+    if (purpose === 'link' && !eligible) {
+      return res.status(409).json({ message: 'This recovery email cannot be used.' });
+    }
+    res.status(202).json({ ok: true });
+  });
+}
+
+app.post('/auth/register/email-code', emailCodeRequest('signup'));
+app.post('/auth/forgot-password', emailCodeRequest('reset'));
+app.post('/auth/recovery-email/code', requireAuth, emailCodeRequest('link'));
+
+app.post('/auth/register', asyncRoute(async (req, res) => {
+  const { name, password, code } = req.body;
+  const childMode = req.body.childMode === true;
+  const email = childMode ? null : authEmail(req.body.email);
+  const normalizedName = typeof name === 'string' ? name.trim() : '';
   if (!normalizedName) return res.status(400).json({ message: 'Name is required' });
-  if (!childMode && !email && !phone) {
-    return res.status(400).json({ message: 'Email or phone is required unless child mode is enabled' });
+  if (!childMode && (!email || !validAuthPassword(password))) {
+    return res.status(400).json({ message: 'Enter a valid email and a password of at least 8 characters and at most 72 UTF-8 bytes.' });
   }
-
-  const duplicate = findUserByIdentity({ email, phone, childName: childMode ? normalizedName : null });
-  if (duplicate) return res.status(409).json({ message: 'User already exists' });
-
+  if (!childMode && !emailAuth.consume(JSON.stringify(['signup', null, email]), code)) {
+    return invalidEmailCode(res);
+  }
+  const passwordHash = childMode ? null : await bcrypt.hash(password, 10);
+  if (findUserByIdentity({ email, childName: childMode ? normalizedName : null })) {
+    return res.status(409).json({ message: 'User already exists' });
+  }
   const user = {
     id: uuid(),
     name: normalizedName,
-    email: email?.toString().trim() || null,
-    phone: phone?.toString().trim() || null,
+    email,
+    emailVerifiedAt: email ? new Date().toISOString() : null,
+    phone: null,
     childMode,
     outsideHouse: true,
-    passwordHash: childMode ? null : await bcrypt.hash(password || '123456', 10),
+    passwordHash,
     notificationPreferences: { ...defaultNotificationPreferences },
     createdAt: new Date().toISOString(),
   };
   db.users.push(user);
-  persistDb();
+  await persistDbNow();
   res.status(201).json({ token: sign(user), user: publicUser(user) });
-});
+}));
+
+app.post('/auth/reset-password', asyncRoute(async (req, res) => {
+  const { code, newPassword } = req.body;
+  const email = authEmail(req.body.email);
+  if (!email || !validAuthPassword(newPassword)) {
+    return res.status(400).json({ message: 'Enter a valid email and a password of at least 8 characters and at most 72 UTF-8 bytes.' });
+  }
+  const user = verifiedRecoveryUser(email);
+  if (!user || !emailAuth.consume(resetCodeKey(user, email), code)) {
+    return invalidEmailCode(res);
+  }
+  const previousHash = user.passwordHash;
+  const hash = await bcrypt.hash(newPassword, 10);
+  if (verifiedRecoveryUser(email) !== user || user.passwordHash !== previousHash) return invalidEmailCode(res);
+  user.passwordHash = hash;
+  user.authVersion = (user.authVersion || 0) + 1;
+  io.in('session:' + user.id).disconnectSockets(true);
+  await persistDbNow();
+  res.json({ ok: true });
+}));
+
+app.post('/auth/recovery-email', requireAuth, asyncRoute(async (req, res) => {
+  const { code, password } = req.body;
+  const email = authEmail(req.body.email);
+  const currentHash = req.user.passwordHash;
+  if (!email || req.user.childMode || !currentHash || typeof password !== 'string' ||
+      Buffer.byteLength(password) > 72 || !await bcrypt.compare(password, currentHash) ||
+      req.user.passwordHash !== currentHash || (req.user.status || 'active') !== 'active') {
+    return res.status(403).json({ message: 'Enter your current Hoomy password and a valid email.' });
+  }
+  const existing = findUserByIdentity({ email });
+  if (existing && existing.id !== req.user.id) {
+    return res.status(409).json({ message: 'This recovery email cannot be used.' });
+  }
+  if (!emailAuth.consume(JSON.stringify(['link', req.user.id, email]), code)) return invalidEmailCode(res);
+  req.user.email = email;
+  req.user.emailVerifiedAt = new Date().toISOString();
+  await persistDbNow();
+  res.json({ user: publicUser(req.user) });
+}));
 
 app.post('/auth/login', async (req, res) => {
   const { email, phone, childName, password } = req.body;
   const user = findUserByIdentity({ email, phone, childName });
-  if (!user) return res.status(401).json({ message: 'Invalid credentials' });
+  if (!user || (user.status || 'active') !== 'active' || (user.childMode && (!childName || email || phone))) return res.status(401).json({ message: 'Invalid credentials' });
 
   if (!user.childMode) {
-    const ok = await bcrypt.compare(password || '', user.passwordHash);
-    if (!ok) return res.status(401).json({ message: 'Invalid credentials' });
+    const hash = user.passwordHash;
+    const ok = await bcrypt.compare(typeof password === 'string' ? password : '', hash || '');
+    if (!ok || user.passwordHash !== hash || (user.status || 'active') !== 'active') {
+      return res.status(401).json({ message: 'Invalid credentials' });
+    }
   }
 
   res.json(authState(user, { token: sign(user) }));
 });
-
-async function verifiedFirebasePhone(req, res) {
-  if (!firebaseApp) {
-    res.status(503).json({ message: 'Phone sign-in is unavailable.' });
-    return null;
-  }
-  try {
-    const token = await getAuth(firebaseApp).verifyIdToken(req.body.idToken, true);
-    const age = Date.now() / 1000 - token.auth_time;
-    if (token.aud === 'hoomy-267dd' && token.firebase?.sign_in_provider === 'phone' &&
-        /^\+[1-9]\d{7,14}$/.test(token.phone_number || '') && age >= -30 && age <= 300) return token;
-  } catch (_) { /* Never log credentials or ID tokens. */ }
-  res.status(401).json({ message: 'Verify your phone again.' });
-  return null;
-}
-
-app.post('/auth/firebase-phone', asyncRoute(async (req, res) => {
-  const identity = await verifiedFirebasePhone(req, res);
-  if (!identity) return;
-  const user = db.users.find((entry) => entry.firebasePhoneUid === identity.uid &&
-    entry.verifiedPhone === identity.phone_number && !entry.childMode && (entry.status || 'active') === 'active');
-  if (!user) return res.status(403).json({ message: 'Sign in with your Hoomy password and link this phone in Settings first.' });
-  res.json(authState(user, { token: sign(user) }));
-}));
-
-app.post('/auth/firebase-phone/link', requireAuth, asyncRoute(async (req, res) => {
-  if (req.user.childMode || !req.user.passwordHash || typeof req.body.password !== 'string' ||
-      !await bcrypt.compare(req.body.password, req.user.passwordHash)) {
-    return res.status(403).json({ message: 'Your current Hoomy password is required.' });
-  }
-  const identity = await verifiedFirebasePhone(req, res);
-  if (!identity) return;
-  if (db.users.some((entry) => entry.id !== req.user.id &&
-    (entry.firebasePhoneUid === identity.uid || entry.verifiedPhone === identity.phone_number))) {
-    return res.status(409).json({ message: 'This verified phone is already linked to another account.' });
-  }
-  req.user.firebasePhoneUid = identity.uid;
-  req.user.verifiedPhone = identity.phone_number;
-  await persistDbNow();
-  res.json({ ok: true });
-}));
-
-app.post('/auth/forgot-password', (_req, res) => {
-  res.status(410).json({ message: 'Password reset is unavailable. Contact Hoomy support.' });
-});
-
-app.post('/auth/reset-password', (_req, res) => {
-  res.status(410).json({ message: 'Password reset is unavailable. Contact Hoomy support.' });
-});
-
-app.post('/auth/firebase-phone/reset-password', asyncRoute(async (req, res) => {
-  const { newPassword } = req.body;
-  if (typeof newPassword !== 'string' || newPassword.length < 8 || Buffer.byteLength(newPassword, 'utf8') > 72) {
-    return res.status(400).json({ message: 'Use at least 8 characters and no more than 72 UTF-8 bytes.' });
-  }
-  const identity = await verifiedFirebasePhone(req, res);
-  if (!identity) return;
-  const user = db.users.find((entry) => entry.firebasePhoneUid === identity.uid &&
-    entry.verifiedPhone === identity.phone_number && !entry.childMode && (entry.status || 'active') === 'active');
-  const eligible = () => user && user.firebasePhoneUid === identity.uid &&
-    user.verifiedPhone === identity.phone_number && (user.status || 'active') === 'active' &&
-    identity.auth_time > (user.phoneResetAuthTime || 0);
-  if (!eligible()) return res.status(403).json({ message: 'Verify again with a phone linked to your Hoomy account.' });
-  const hash = await bcrypt.hash(newPassword, 10);
-  if (!eligible()) return res.status(403).json({ message: 'Verify again with a phone linked to your Hoomy account.' });
-  user.passwordHash = hash;
-  user.phoneResetAuthTime = identity.auth_time;
-  await persistDbNow();
-  res.json({ ok: true });
-}));
 
 app.get('/auth/me', requireAuth, (req, res) => {
   const updatedClientInfo = updateUserClientInfo(req.user, {
@@ -2917,12 +2956,27 @@ app.post('/devices/fcm-token', requireAuth, (req, res) => {
   const token = req.body.token?.toString().trim();
   if (!token) return res.status(400).json({ message: 'FCM token is required' });
 
+  for (const user of db.users) {
+    if (user !== req.user && user.fcmTokens?.includes(token)) {
+      user.fcmTokens = user.fcmTokens.filter((item) => item !== token);
+    }
+  }
   req.user.fcmTokens = req.user.fcmTokens || [];
   if (!req.user.fcmTokens.includes(token)) req.user.fcmTokens.push(token);
   persistDb();
 
   res.json({ ok: true, tokenCount: req.user.fcmTokens.length });
 });
+
+app.delete('/devices/fcm-token', requireAuth, asyncRoute(async (req, res) => {
+  const token = typeof req.body.token === 'string' ? req.body.token.trim() : '';
+  if (!token) return res.status(400).json({ message: 'FCM token is required' });
+  if (req.user.fcmTokens?.includes(token)) {
+    req.user.fcmTokens = req.user.fcmTokens.filter((item) => item !== token);
+    await persistDbNow();
+  }
+  res.json({ ok: true });
+}));
 
 app.post('/devices/test-notification', requireAuth, async (req, res) => {
   const title = req.body.title?.toString() || 'Hoomy alert test';
@@ -3738,7 +3792,8 @@ io.use((socket, next) => {
     if (requireHttps && !isSecureTransport(socket.request, proxyHops > 0)) throw new Error('HTTPS required');
     const payload = jwt.verify(socket.handshake.auth?.token || '', jwtSecret);
     const user = db.users.find((item) => item.id === payload.userId);
-    if (!user || ['suspended', 'disabled', 'deleted'].includes(user.status)) throw new Error('Unauthorized');
+    if (!user || (payload.authVersion || 0) !== (user.authVersion || 0) ||
+        ['suspended', 'disabled', 'deleted'].includes(user.status)) throw new Error('Unauthorized');
     socket.userId = payload.userId;
     socket.sessionExpiresAt = payload.exp * 1000;
     next();
@@ -3748,6 +3803,7 @@ io.use((socket, next) => {
 });
 
 io.on('connection', (socket) => {
+  socket.join('session:' + socket.userId);
   socket.on('joinHouse', (houseId) => {
     if (typeof houseId !== 'string') return;
     const house = db.houses.find((item) => item.id === houseId);
