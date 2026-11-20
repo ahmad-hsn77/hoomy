@@ -2782,8 +2782,12 @@ function emailCodeRequest(purpose) {
   return asyncRoute(async (req, res) => {
     const email = authEmail(req.body.email);
     if (!email) return res.status(400).json({ message: 'Enter a valid email address.' });
-    if (!emailAuth.ready) return res.status(503).json({ message: 'Email verification is unavailable.' });
     const existing = findUserByIdentity({ email });
+    if (existing && (purpose === 'signup' ||
+        (purpose === 'link' && existing.id !== req.user.id))) {
+      return res.status(409).json({ message: 'This email is already linked to another Hoomy account.' });
+    }
+    if (!emailAuth.ready) return res.status(503).json({ message: 'Email verification is unavailable.' });
     const user = purpose === 'reset' ? verifiedRecoveryUser(email) : req.user;
     const eligible = purpose === 'signup'
       ? !existing
@@ -2878,7 +2882,7 @@ app.post('/auth/recovery-email', requireAuth, asyncRoute(async (req, res) => {
   }
   const existing = findUserByIdentity({ email });
   if (existing && existing.id !== req.user.id) {
-    return res.status(409).json({ message: 'This recovery email cannot be used.' });
+    return res.status(409).json({ message: 'This email is already linked to another Hoomy account.' });
   }
   if (!emailAuth.consume(JSON.stringify(['link', req.user.id, email]), code)) return invalidEmailCode(res);
   req.user.email = email;
