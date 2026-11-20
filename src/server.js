@@ -2815,16 +2815,19 @@ app.post('/auth/register', asyncRoute(async (req, res) => {
   const { name, password, code } = req.body;
   const childMode = req.body.childMode === true;
   const email = childMode ? null : authEmail(req.body.email);
+  const phone = !childMode && typeof req.body.phone === 'string' ? req.body.phone.trim() : null;
   const normalizedName = typeof name === 'string' ? name.trim() : '';
   if (!normalizedName) return res.status(400).json({ message: 'Name is required' });
-  if (!childMode && (!email || !validAuthPassword(password))) {
+  if (!childMode && ((!email && !phone) ||
+      (req.body.email && !email) || (phone && !/^\+?[0-9]{7,15}$/.test(phone)) ||
+      !validAuthPassword(password))) {
     return res.status(400).json({ message: 'Enter a valid email and a password of at least 8 characters and at most 72 UTF-8 bytes.' });
   }
-  if (!childMode && !emailAuth.consume(JSON.stringify(['signup', null, email]), code)) {
+  if (email && !emailAuth.consume(JSON.stringify(['signup', null, email]), code)) {
     return invalidEmailCode(res);
   }
   const passwordHash = childMode ? null : await bcrypt.hash(password, 10);
-  if (findUserByIdentity({ email, childName: childMode ? normalizedName : null })) {
+  if (findUserByIdentity({ email, phone, childName: childMode ? normalizedName : null })) {
     return res.status(409).json({ message: 'User already exists' });
   }
   const user = {
@@ -2832,7 +2835,7 @@ app.post('/auth/register', asyncRoute(async (req, res) => {
     name: normalizedName,
     email,
     emailVerifiedAt: email ? new Date().toISOString() : null,
-    phone: null,
+    phone,
     childMode,
     outsideHouse: true,
     passwordHash,
