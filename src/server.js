@@ -948,6 +948,7 @@ function adminAlertSummary(alert) {
     ...alert,
     houseName: house?.name || 'Unknown house',
     requesterName: creator?.name || 'Unknown member',
+    completedByName: alert.bought ? userForId(alert.bought.by)?.name || alert.bought.byName || 'Former member' : null,
   };
 }
 
@@ -1013,7 +1014,7 @@ function recentAdminActivity() {
     ...db.alerts.map((alert) => ({
       id: alert.id,
       type: alert.status === 'bought' ? 'need.done' : 'need.created',
-      description: `${alert.title} in ${houseForId(alert.houseId)?.name || 'Unknown house'}`,
+      description: 'Household request activity',
       at: alert.bought?.at || alert.createdAt,
       tone: alert.emergency ? 'danger' : 'info',
     })),
@@ -2239,17 +2240,16 @@ app.get('/admin/houses/:houseId', requireAdmin, (req, res) => {
   res.json({
     ...adminHouseSummary(house),
     members: houseMembers(house),
-    alerts: houseAlerts(house).map(adminAlertSummary),
     reminders: adminHouseReminders(house).map(adminReminderSummary),
-    messages: houseMessages(house, { limit: 30 }).map(adminMessageSummary),
     shortcuts: houseShortcuts(house),
   });
 });
 
-app.get('/admin/needs', requireAdmin, (req, res) => {
+app.get('/admin/needs', requireAdmin, requireAdminPermission('reports:view'), (req, res) => {
   const query = adminListQuery(req.query);
   const status = query.status === 'all' ? '' : query.status;
   const needs = db.alerts
+    .filter((alert) => db.feedback.some((report) => report.needId === alert.id && report.houseId === alert.houseId))
     .map(adminAlertSummary)
     .filter((alert) =>
       matchesSearch([alert.title, alert.note, alert.quantity, alert.houseName, alert.requesterName], query.search)
@@ -2259,10 +2259,42 @@ app.get('/admin/needs', requireAdmin, (req, res) => {
   res.json(paginate(needs, query));
 });
 
-app.get('/admin/messages', requireAdmin, (req, res) => {
+app.post('/admin/needs/:needId/access', requireAdmin, requireSuperAdmin, asyncRoute(async (req, res) => {
+  const reason = typeof req.body.reason === 'string' ? req.body.reason.trim() : '';
+  if (reason.length < 15 || reason.length > 1000) return res.status(400).json({ message: 'Provide an investigation reason between 15 and 1000 characters.' });
+  const alert = db.alerts.find((item) => item.id === req.params.needId);
+  if (!alert) return res.status(404).json({ message: 'Request not found' });
+  recordAdminAction(req, 'need.exceptional_access', { type: 'need', id: alert.id, description: reason });
+  await persistDbNow();
+  res.set('Cache-Control', 'no-store');
+  res.json(adminAlertSummary(alert));
+}));
+
+function reportedMessage(message) {
+  return message.reported === true || message.userReportedAt != null ||
+    message.moderationStatus === 'reported' || message.reportedForModeration === true;
+}
+
+app.post('/admin/messages/:messageId/access', requireAdmin, requireSuperAdmin, asyncRoute(async (req, res) => {
+  const reason = typeof req.body.reason === 'string' ? req.body.reason.trim() : '';
+  if (reason.length < 15 || reason.length > 1000) {
+    return res.status(400).json({ message: 'Provide an investigation reason between 15 and 1000 characters.' });
+  }
+  const message = db.messages.find((item) => idOf(item.id) === idOf(req.params.messageId));
+  if (!message) return res.status(404).json({ message: 'Message not found' });
+  recordAdminAction(req, 'message.exceptional_access', {
+    type: 'message', id: message.id, description: reason,
+  });
+  await persistDbNow();
+  res.set('Cache-Control', 'no-store');
+  res.json(adminMessageSummary(message));
+}));
+
+app.get('/admin/messages', requireAdmin, requireAdminPermission('reports:view'), (req, res) => {
   const query = adminListQuery(req.query);
   const status = query.status === 'all' ? '' : query.status;
   const messages = db.messages
+    .filter(reportedMessage)
     .map(adminMessageSummary)
     .filter((message) =>
       matchesSearch([message.text, message.houseName, message.senderName, message.moderationStatus], query.search)
@@ -2272,9 +2304,11 @@ app.get('/admin/messages', requireAdmin, (req, res) => {
   res.json(paginate(messages, query));
 });
 
-app.patch('/admin/messages/:messageId/moderation', requireAdmin, (req, res) => {
+app.patch('/admin/messages/:messageId/moderation', requireAdmin, requireAdminPermission('reports:view'), (req, res) => {
   const message = db.messages.find((item) => idOf(item.id) === idOf(req.params.messageId));
   if (!message) return res.status(404).json({ message: 'Message not found' });
+  if (!reportedMessage(message)) return res.status(403).json({ message: 'Only reported messages can be moderated.' });
+  message.reportedForModeration = true;
   const moderationStatus = ['normal', 'reported', 'hidden', 'resolved'].includes(req.body.status)
     ? req.body.status
     : 'resolved';
@@ -2401,6 +2435,7 @@ app.post('/admin/feedback/:id/read', requireAdmin, requireAdminPermission('repor
 app.get('/admin/reports', requireAdmin, requireAdminPermission('reports:view'), (req, res) => {
   const query = adminListQuery(req.query);
   const reports = db.messages
+    .filter(reportedMessage)
     .map(adminMessageSummary)
     .filter((message) => ['reported', 'hidden'].includes(message.moderationStatus))
     .map((message) => ({
@@ -2492,6 +2527,25 @@ app.post('/feedback', requireAuth, asyncRoute(async (req, res) => {
     appVersion: typeof req.body.appVersion === 'string' ? req.body.appVersion.slice(0, 40) : '',
     platform: typeof req.body.platform === 'string' ? req.body.platform.slice(0, 40) : '',
   };
+  if (req.body.messageId != null) {
+    const message = db.messages.find((entry) => entry.id === req.body.messageId && entry.houseId === houseId);
+    if (!houseId || !message) return res.status(404).json({ message: 'Message not found in this house.' });
+    item.messageId = message.id;
+    item.sharedMessage = req.body.shareMessage === true;
+    item.description += '\n\nMessage ID: ' + message.id;
+    if (item.sharedMessage) {
+      message.reported = true;
+      item.description += '\nShared message: ' + (message.text || (message.image ? 'Photo' : message.audio ? 'Voice message' : 'Message'));
+    }
+  }
+  if (req.body.needId != null) {
+    const alert = db.alerts.find((entry) => entry.id === req.body.needId && entry.houseId === houseId);
+    if (!houseId || !alert) return res.status(404).json({ message: 'Request not found in this house.' });
+    item.needId = alert.id;
+    item.description += '\n\nShared family request: ' + alert.title +
+      '\nRequest ID: ' + alert.id + '\nNotes: ' + (alert.note || '') +
+      '\nQuantity: ' + (alert.quantity || '') + '\nStatus: ' + (alert.status || 'open');
+  }
   // Detect the report's language rather than relying on the app's UI language.
   const arabicLetters = (description.match(/(?=\p{Letter})\p{Script_Extensions=Arabic}/gu) || []).length;
   const latinLetters = (description.match(/(?=\p{Letter})\p{Script_Extensions=Latin}/gu) || []).length;
@@ -3372,6 +3426,7 @@ app.post('/houses/:houseId/alerts/:alertId/bought', requireAuth, requireHouseMem
   alert.status = 'bought';
   alert.bought = {
     by: req.user.id,
+    byName: req.user.name,
     quantity: req.body.quantity || null,
     price: req.body.price || null,
     note: req.body.note || null,
